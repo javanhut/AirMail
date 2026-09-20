@@ -1,0 +1,34 @@
+# ImLazy configuration file
+
+[settings]
+default = "build"
+
+[commands]
+
+[commands.build]
+desc = "Build airmail"
+run = ["cargo build"]
+
+[commands.run]
+desc = "Run airmail GUI"
+run = ["cargo run"]
+
+[commands.check]
+desc = "Type-check"
+run = ["cargo check"]
+
+[commands.clippy]
+desc = "Lint with warnings as errors"
+run = ["cargo clippy --all-targets -- -D warnings"]
+
+[commands.fmt]
+desc = "Format code"
+run = ["cargo fmt"]
+
+[commands.test]
+desc = "Run tests"
+run = ["cargo test"]
+
+[commands.doctor]
+desc = "Check IMAP/SMTP connectivity for all configured accounts"
+run = ["cargo run -- --doctor"]

@@ -1,0 +1,26 @@
+[package]
+name = "airmail"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+async-imap = { version = "0.11.3", features = ["runtime-tokio", "tokio"], default-features = false }
+chrono = { version = "0.4.45", features = ["serde"] }
+directories = "6.0.0"
+eframe = "0.36.2"
+egui = "0.36.2"
+futures = "0.3.34"
+keyring = "4.2.0"
+lettre = { version = "0.11.23", features = ["builder", "pool", "smtp-transport", "tokio1", "tokio1-rustls-tls"], default-features = false }
+mail-parser = "0.11.9"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+rustls-pki-types = "1.15.1"
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["full"] }
+tokio-rustls = "0.26.5"
+toml = "1.1.6"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+webpki-roots = "1.0.9"
