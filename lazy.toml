@@ -104,7 +104,11 @@ run = [
   "install -Dm644 data/icons/hicolor/scalable/apps/dev.raven.AirMail.svg {{prefix}}/share/icons/hicolor/scalable/apps/dev.raven.AirMail.svg",
   "install -Dm644 data/dev.raven.AirMail.desktop {{prefix}}/share/applications/dev.raven.AirMail.desktop",
   # The entry ships with a bare `Exec=airmail`; point it at wherever it landed.
-  "sed -i 's|^Exec=airmail$|Exec={{prefix}}/bin/airmail|' {{prefix}}/share/applications/dev.raven.AirMail.desktop",
+  # Double quotes, so a prefix like `$HOME/.local` is expanded by the shell
+  # rather than written into the file — `Exec=` may not contain a literal `$`,
+  # and desktop-file-validate rejects the entry if it does. The `\$` keeps the
+  # regex's end-of-line anchor out of the shell's hands.
+  "sed -i \"s|^Exec=airmail\\$|Exec={{prefix}}/bin/airmail|\" {{prefix}}/share/applications/dev.raven.AirMail.desktop",
   "desktop-file-validate {{prefix}}/share/applications/dev.raven.AirMail.desktop",
   "update-desktop-database {{prefix}}/share/applications || true",
   "gtk4-update-icon-cache -qtf {{prefix}}/share/icons/hicolor || true",
