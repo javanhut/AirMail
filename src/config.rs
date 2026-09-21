@@ -28,7 +28,13 @@ fn account_file_path(email: &str) -> Result<PathBuf> {
     // sanitize: keep only safe filename chars
     let safe: String = email
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     Ok(accounts_dir()?.join(format!("{safe}.toml")))
 }
@@ -39,8 +45,8 @@ pub fn load_accounts() -> Result<Vec<AccountConfig>> {
     for entry in fs::read_dir(&dir)?.flatten() {
         let path = entry.path();
         if path.extension().is_some_and(|e| e == "toml") {
-            let text = fs::read_to_string(&path)
-                .with_context(|| format!("reading {}", path.display()))?;
+            let text =
+                fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
             match toml::from_str::<AccountConfig>(&text) {
                 Ok(cfg) => accounts.push(cfg),
                 Err(e) => tracing::warn!("skipping invalid account file {}: {e}", path.display()),

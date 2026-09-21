@@ -49,11 +49,16 @@ fn format_address(addr: &Address) -> String {
 
 fn to_utc(d: &MailDate) -> Option<DateTime<Utc>> {
     let date = NaiveDate::from_ymd_opt(i32::from(d.year), u32::from(d.month), u32::from(d.day))?;
-    let time = NaiveTime::from_hms_opt(u32::from(d.hour), u32::from(d.minute), u32::from(d.second))?;
+    let time =
+        NaiveTime::from_hms_opt(u32::from(d.hour), u32::from(d.minute), u32::from(d.second))?;
     let naive = NaiveDateTime::new(date, time);
     let offset = Duration::hours(i64::from(d.tz_hour)) + Duration::minutes(i64::from(d.tz_minute));
     // tz_before_gmt = true means the written time is behind GMT, so add the offset.
-    let utc = if d.tz_before_gmt { naive + offset } else { naive - offset };
+    let utc = if d.tz_before_gmt {
+        naive + offset
+    } else {
+        naive - offset
+    };
     Some(DateTime::<Utc>::from_naive_utc_and_offset(utc, Utc))
 }
 

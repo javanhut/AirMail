@@ -3,7 +3,7 @@ use lettre::message::{Mailbox as LettreMailbox, MessageBuilder};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
-use crate::models::AccountConfig;
+use crate::models::{AccountConfig, SmtpSecurity};
 
 pub struct SentMessage {
     /// Raw RFC822 of the sent message, for IMAP APPEND to Sent.
@@ -33,26 +33,37 @@ pub async fn send(
         .body(body.to_string())?;
 
     let raw = message.formatted().to_vec();
-    let transport = transport(cfg, password);
-    transport
+    transport(cfg, password)?
         .send(message)
         .await
         .context("SMTP send failed")?;
     Ok(SentMessage { raw })
 }
 
-/// Build an SMTP transport: implicit TLS (SMTPS) on the configured port.
-fn transport(cfg: &AccountConfig, password: &str) -> AsyncSmtpTransport<Tokio1Executor> {
-    AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.smtp_host)
-        .expect("invalid SMTP host")
+/// Build an SMTP transport matching the account's encryption: implicit TLS
+/// (SMTPS, port 465) or a plain connection upgraded with STARTTLS (port 587).
+/// Office 365 and iCloud only offer the latter.
+fn transport(cfg: &AccountConfig, password: &str) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
+    let builder = match cfg.smtp_security {
+        SmtpSecurity::Tls => AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.smtp_host),
+        SmtpSecurity::StartTls => {
+            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.smtp_host)
+        }
+    }
+    .with_context(|| format!("invalid SMTP host {:?}", cfg.smtp_host))?;
+
+    Ok(builder
         .port(cfg.smtp_port)
-        .credentials(Credentials::new(cfg.imap_username().to_string(), password.to_string()))
-        .build()
+        .credentials(Credentials::new(
+            cfg.imap_username().to_string(),
+            password.to_string(),
+        ))
+        .build())
 }
 
 /// Check IMAP login and SMTP connectivity for every configured account.
 pub async fn check_account(cfg: &AccountConfig, password: &str) -> Result<()> {
-    transport(cfg, password)
+    transport(cfg, password)?
         .test_connection()
         .await
         .context("SMTP connection/auth failed")?;

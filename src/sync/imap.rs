@@ -5,7 +5,7 @@ use async_imap::Session;
 use futures::TryStreamExt;
 use rustls_pki_types::ServerName;
 use tokio::net::TcpStream;
-use tokio_rustls::{client::TlsStream, TlsConnector};
+use tokio_rustls::{TlsConnector, client::TlsStream};
 
 use crate::models::AccountConfig;
 
@@ -74,9 +74,10 @@ pub async fn fetch_messages(
     folder: &str,
     uid_set: &str,
 ) -> Result<Vec<FetchedMessage>> {
-    let _mailbox = session.examine(folder).await.with_context(|| {
-        format!("cannot open folder {folder:?} — it may have been deleted")
-    })?;
+    let _mailbox = session
+        .examine(folder)
+        .await
+        .with_context(|| format!("cannot open folder {folder:?} — it may have been deleted"))?;
     if uid_set.is_empty() {
         return Ok(Vec::new());
     }
@@ -113,11 +114,7 @@ pub async fn all_uids(session: &mut ImapSession, folder: &str) -> Result<Vec<u32
 }
 
 /// Append an already-sent message to the account's Sent folder.
-pub async fn append_to_folder(
-    session: &mut ImapSession,
-    folder: &str,
-    raw: &[u8],
-) -> Result<()> {
+pub async fn append_to_folder(session: &mut ImapSession, folder: &str, raw: &[u8]) -> Result<()> {
     session
         .append(folder, Some("\\Seen"), None, raw)
         .await

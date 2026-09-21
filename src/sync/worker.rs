@@ -15,9 +15,18 @@ use crate::models::AccountConfig;
 #[derive(Debug)]
 pub enum SyncEvent {
     /// Incremental refresh signal; UI re-queries the database.
-    Updated { account: String, folder: String },
-    NewMessages { account: String, count: usize },
-    Error { account: String, message: String },
+    Updated {
+        account: String,
+        folder: String,
+    },
+    NewMessages {
+        account: String,
+        count: usize,
+    },
+    Error {
+        account: String,
+        message: String,
+    },
 }
 
 const POLL_INTERVAL: Duration = Duration::from_secs(30);
@@ -73,7 +82,12 @@ async fn sync_once(
     db.delete_missing_folders(account_db_id, &folders)?;
 
     // Remember the sent folder once: first folder whose name mentions "sent".
-    if db.list_accounts()?.iter().find(|a| a.id == account_db_id).and_then(|a| a.sent_folder.clone()).is_none()
+    if db
+        .list_accounts()?
+        .iter()
+        .find(|a| a.id == account_db_id)
+        .and_then(|a| a.sent_folder.clone())
+        .is_none()
         && let Some(sent) = folders.iter().find(|f| f.to_lowercase().contains("sent"))
     {
         db.set_sent_folder(account_db_id, sent)?;

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use airmail::db::Db;
-use airmail::models::AccountConfig;
+use airmail::models::{AccountConfig, SmtpSecurity};
 
 fn temp_db(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("airmail-test-{name}-{}.db", std::process::id()));
@@ -18,6 +18,7 @@ fn test_account(email: &str) -> AccountConfig {
         imap_port: 993,
         smtp_host: "smtp.example.com".to_string(),
         smtp_port: 465,
+        smtp_security: SmtpSecurity::Tls,
     }
 }
 
@@ -37,8 +38,10 @@ fn account_roundtrip_and_cascade() {
     assert_eq!(db.list_accounts().unwrap().len(), 1);
 
     let folder = db.upsert_folder(id, "INBOX", Some(42)).unwrap();
-    db.store_message(folder, 7, "Hi", "x@y.z", "a@b.c", None, false, false, "body", "", b"raw")
-        .unwrap();
+    db.store_message(
+        folder, 7, "Hi", "x@y.z", "a@b.c", None, false, false, "body", "", b"raw",
+    )
+    .unwrap();
     assert_eq!(db.count_messages().unwrap(), 1);
 
     // deleting the account cascades to folders and messages
@@ -56,7 +59,8 @@ fn uidvalidity_change_purges_folder() {
 
     let id = db.upsert_account(&test_account("v@w.x")).unwrap();
     let folder = db.upsert_folder(id, "INBOX", Some(1)).unwrap();
-    db.store_message(folder, 1, "s", "f", "t", None, true, false, "b", "", b"r").unwrap();
+    db.store_message(folder, 1, "s", "f", "t", None, true, false, "b", "", b"r")
+        .unwrap();
     assert_eq!(db.count_messages().unwrap(), 1);
 
     // server reports a new UIDVALIDITY → cache is wiped, resync from scratch
@@ -78,8 +82,24 @@ fn message_summaries_unified_and_per_folder() {
     let f2 = db.upsert_folder(id2, "INBOX", Some(9)).unwrap();
 
     let ts = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
-    db.store_message(f1, 1, "from one", "one@x.y", "", Some(ts), false, false, "", "", b"").unwrap();
-    db.store_message(f2, 1, "from two", "two@x.y", "", None, true, true, "", "", b"").unwrap();
+    db.store_message(
+        f1,
+        1,
+        "from one",
+        "one@x.y",
+        "",
+        Some(ts),
+        false,
+        false,
+        "",
+        "",
+        b"",
+    )
+    .unwrap();
+    db.store_message(
+        f2, 1, "from two", "two@x.y", "", None, true, true, "", "", b"",
+    )
+    .unwrap();
 
     let unified = db.message_summaries(None, 100).unwrap();
     assert_eq!(unified.len(), 2);

@@ -16,6 +16,30 @@ pub struct AccountConfig {
     pub smtp_host: String,
     #[serde(default = "default_smtp_port")]
     pub smtp_port: u16,
+    #[serde(default)]
+    pub smtp_security: SmtpSecurity,
+}
+
+/// How the SMTP connection is encrypted. Providers split roughly in two:
+/// port 465 wraps the whole connection in TLS, port 587 starts in the clear
+/// and upgrades. Getting this wrong looks like a hang, not an error.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SmtpSecurity {
+    /// Implicit TLS for the whole session (SMTPS, usually port 465).
+    #[default]
+    Tls,
+    /// Plain connection upgraded with STARTTLS (usually port 587).
+    StartTls,
+}
+
+impl SmtpSecurity {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Tls => "TLS",
+            Self::StartTls => "STARTTLS",
+        }
+    }
 }
 
 fn default_imap_port() -> u16 {

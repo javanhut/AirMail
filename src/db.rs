@@ -1,12 +1,13 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
-use crate::models::{Account, AccountConfig, Folder, MessageDetail, MessageSummary};
+use crate::models::{Account, AccountConfig, Folder, MessageDetail, MessageSummary, SmtpSecurity};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// One connection per thread/process segment. The GUI thread and each sync
 /// worker open their own connection; SQLite WAL mode coordinates them.
@@ -74,23 +75,31 @@ impl Db {
                 CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date);
                 ",
             )?;
-            self.conn
-                .pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
+        if version < 2 {
+            // Added when Outlook and iCloud turned out to need STARTTLS rather
+            // than the implicit TLS every account had been assumed to use.
+            self.conn.execute_batch(
+                "ALTER TABLE accounts ADD COLUMN smtp_security TEXT NOT NULL DEFAULT 'tls';",
+            )?;
+        }
+        self.conn
+            .pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
     }
 
     pub fn upsert_account(&self, cfg: &AccountConfig) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO accounts (email, display_name, username, imap_host, imap_port, smtp_host, smtp_port)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO accounts (email, display_name, username, imap_host, imap_port, smtp_host, smtp_port, smtp_security)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(email) DO UPDATE SET
-               display_name = excluded.display_name,
-               username     = excluded.username,
-               imap_host    = excluded.imap_host,
-               imap_port    = excluded.imap_port,
-               smtp_host    = excluded.smtp_host,
-               smtp_port    = excluded.smtp_port",
+               display_name  = excluded.display_name,
+               username      = excluded.username,
+               imap_host     = excluded.imap_host,
+               imap_port     = excluded.imap_port,
+               smtp_host     = excluded.smtp_host,
+               smtp_port     = excluded.smtp_port,
+               smtp_security = excluded.smtp_security",
             params![
                 cfg.email,
                 cfg.display_name,
@@ -99,6 +108,7 @@ impl Db {
                 cfg.imap_port,
                 cfg.smtp_host,
                 cfg.smtp_port,
+                smtp_security_text(cfg.smtp_security),
             ],
         )?;
         Ok(self.conn.query_row(
@@ -124,7 +134,7 @@ impl Db {
 
     pub fn list_accounts(&self) -> Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, email, display_name, username, imap_host, imap_port, smtp_host, smtp_port, sent_folder
+            "SELECT id, email, display_name, username, imap_host, imap_port, smtp_host, smtp_port, sent_folder, smtp_security
              FROM accounts ORDER BY email",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -137,6 +147,7 @@ impl Db {
                 imap_port: row.get(5)?,
                 smtp_host: row.get(6)?,
                 smtp_port: row.get(7)?,
+                smtp_security: smtp_security_from(&row.get::<_, String>(9)?),
             };
             Ok(Account {
                 id: row.get(0)?,
@@ -168,10 +179,8 @@ impl Db {
         match existing {
             Some((id, known_validity)) if known_validity == uid_validity => Ok(id),
             Some((id, _)) => {
-                self.conn.execute(
-                    "DELETE FROM messages WHERE folder_id = ?1",
-                    params![id],
-                )?;
+                self.conn
+                    .execute("DELETE FROM messages WHERE folder_id = ?1", params![id])?;
                 self.conn.execute(
                     "UPDATE folders SET uid_validity = ?3, last_seen_uid = 0 WHERE id = ?1 AND account_id = ?2",
                     params![id, account_db_id, uid_validity],
@@ -193,9 +202,14 @@ impl Db {
         }
     }
 
-    pub fn delete_missing_folders(&self, account_db_id: i64, present_names: &[String]) -> Result<()> {
-        let mut stmt =
-            self.conn.prepare("SELECT id, name FROM folders WHERE account_id = ?1")?;
+    pub fn delete_missing_folders(
+        &self,
+        account_db_id: i64,
+        present_names: &[String],
+    ) -> Result<()> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name FROM folders WHERE account_id = ?1")?;
         let rows = stmt
             .query_map(params![account_db_id], |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
@@ -270,7 +284,11 @@ impl Db {
         raw: &[u8],
     ) -> Result<i64> {
         let date = date.map(|d| d.timestamp());
-        let raw: Option<&[u8]> = if raw.len() <= Self::RAW_CAP { Some(raw) } else { None };
+        let raw: Option<&[u8]> = if raw.len() <= Self::RAW_CAP {
+            Some(raw)
+        } else {
+            None
+        };
         self.conn.execute(
             "INSERT INTO messages
                (folder_id, uid, subject, sender, recipients, date, seen, has_attachments, body_text, body_html, raw)
@@ -376,9 +394,35 @@ impl Db {
         Ok(())
     }
 
+    /// Unread message count per folder id, for the badges in the sidebar.
+    /// Folders with nothing unread are left out.
+    pub fn unread_counts(&self) -> Result<HashMap<i64, i64>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT folder_id, COUNT(*) FROM messages WHERE seen = 0 GROUP BY folder_id",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn count_messages(&self) -> Result<i64> {
         Ok(self
             .conn
             .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))?)
+    }
+}
+
+fn smtp_security_text(value: SmtpSecurity) -> &'static str {
+    match value {
+        SmtpSecurity::Tls => "tls",
+        SmtpSecurity::StartTls => "start_tls",
+    }
+}
+
+/// Unknown values fall back to implicit TLS, which is what every account
+/// written before the column existed was using.
+fn smtp_security_from(value: &str) -> SmtpSecurity {
+    match value {
+        "start_tls" => SmtpSecurity::StartTls,
+        _ => SmtpSecurity::Tls,
     }
 }

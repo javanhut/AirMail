@@ -8,8 +8,9 @@ anyhow = "1.0.104"
 async-imap = { version = "0.11.3", features = ["runtime-tokio", "tokio"], default-features = false }
 chrono = { version = "0.4.45", features = ["serde"] }
 directories = "6.0.0"
-eframe = "0.36.2"
-egui = "0.36.2"
+# v4_12 for `CssProvider::load_from_string`; the system GTK is 4.22.
+gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
 futures = "0.3.34"
 keyring = "4.2.0"
 lettre = { version = "0.11.23", features = ["builder", "pool", "smtp-transport", "tokio1", "tokio1-rustls-tls"], default-features = false }
@@ -24,3 +25,4 @@ toml = "1.1.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 webpki-roots = "1.0.9"
+
