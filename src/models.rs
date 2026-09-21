@@ -85,7 +85,12 @@ pub struct MessageSummary {
     pub from: String,
     pub date: Option<DateTime<Utc>>,
     pub seen: bool,
+    /// The IMAP `\Flagged` flag — the star in the list and reading pane.
+    pub flagged: bool,
     pub has_attachments: bool,
+    /// First line or so of the body, for the row's third line. Stored
+    /// squashed to one line at query time so rows do not have to re-wrap it.
+    pub preview: String,
 }
 
 /// Full message for the reading pane.

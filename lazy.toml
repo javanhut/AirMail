@@ -7,6 +7,9 @@ default = "build"
 # Where `install` puts things. `$HOME/.local` needs no root and is picked up by
 # the desktop automatically; override per run, e.g.
 #     imlazy install prefix=/usr/local
+# For a system-wide install, build as yourself and copy as root, so cargo never
+# leaves root-owned files in target/:
+#     imlazy release && sudo imlazy install-files prefix=/usr/local
 prefix = "$HOME/.local"
 
 [commands]
@@ -90,8 +93,12 @@ run = [
 ]
 
 [commands.install]
-desc = "Install the binary, desktop entry and icon (override: prefix=/usr/local)"
-dep = ["release"]
+desc = "Build and install AirMail for the current user (override: prefix=/usr/local)"
+dep = ["release", "install-files"]
+run = ["echo 'AirMail installed to {{prefix}} — it should now show up in your launcher'"]
+
+[commands.install-files]
+desc = "Copy an already-built AirMail into prefix, without building it first"
 run = [
   "install -Dm755 target/release/airmail {{prefix}}/bin/airmail",
   "install -Dm644 data/icons/hicolor/scalable/apps/dev.raven.AirMail.svg {{prefix}}/share/icons/hicolor/scalable/apps/dev.raven.AirMail.svg",
@@ -101,7 +108,6 @@ run = [
   "desktop-file-validate {{prefix}}/share/applications/dev.raven.AirMail.desktop",
   "update-desktop-database {{prefix}}/share/applications || true",
   "gtk4-update-icon-cache -qtf {{prefix}}/share/icons/hicolor || true",
-  "echo 'AirMail installed to {{prefix}} — it should now show up in your launcher'",
 ]
 
 [commands.uninstall]

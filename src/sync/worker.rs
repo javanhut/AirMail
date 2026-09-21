@@ -177,6 +177,7 @@ async fn sync_folder(
             &parsed.to,
             parsed.date,
             msg.seen,
+            msg.flagged,
             parsed.has_attachments,
             &parsed.body_text,
             &parsed.body_html,

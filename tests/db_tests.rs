@@ -39,7 +39,7 @@ fn account_roundtrip_and_cascade() {
 
     let folder = db.upsert_folder(id, "INBOX", Some(42)).unwrap();
     db.store_message(
-        folder, 7, "Hi", "x@y.z", "a@b.c", None, false, false, "body", "", b"raw",
+        folder, 7, "Hi", "x@y.z", "a@b.c", None, false, false, false, "body", "", b"raw",
     )
     .unwrap();
     assert_eq!(db.count_messages().unwrap(), 1);
@@ -59,7 +59,7 @@ fn uidvalidity_change_purges_folder() {
 
     let id = db.upsert_account(&test_account("v@w.x")).unwrap();
     let folder = db.upsert_folder(id, "INBOX", Some(1)).unwrap();
-    db.store_message(folder, 1, "s", "f", "t", None, true, false, "b", "", b"r")
+    db.store_message(folder, 1, "s", "f", "t", None, true, false, false, "b", "", b"r")
         .unwrap();
     assert_eq!(db.count_messages().unwrap(), 1);
 
@@ -90,14 +90,15 @@ fn message_summaries_unified_and_per_folder() {
         "",
         Some(ts),
         false,
+        true,
         false,
-        "",
+        "the body of the first one",
         "",
         b"",
     )
     .unwrap();
     db.store_message(
-        f2, 1, "from two", "two@x.y", "", None, true, true, "", "", b"",
+        f2, 1, "from two", "two@x.y", "", None, true, false, true, "", "", b"",
     )
     .unwrap();
 
@@ -106,9 +107,24 @@ fn message_summaries_unified_and_per_folder() {
     assert!(unified.iter().any(|m| !m.seen));
     assert!(unified.iter().any(|m| m.has_attachments));
 
-    let only_one = db.message_summaries(Some(f1), 100).unwrap();
+    assert!(unified.iter().any(|m| m.flagged), "the star is carried over");
+    assert_eq!(db.count_flagged().unwrap(), 1);
+
+    // An empty scope is an empty list, not everything.
+    assert!(db.message_summaries(Some(&[]), 100).unwrap().is_empty());
+
+    let only_one = db.message_summaries(Some(&[f1]), 100).unwrap();
     assert_eq!(only_one.len(), 1);
     assert_eq!(only_one[0].subject, "from one");
+    assert_eq!(only_one[0].preview, "the body of the first one");
+
+    // The contact pane matches a correspondent on their address.
+    let theirs = db.messages_from("one@x.y", 10).unwrap();
+    assert_eq!(theirs.len(), 1);
+    assert_eq!(db.sender_stats("one@x.y").unwrap().messages, 1);
+
+    db.set_flagged(only_one[0].id, false).unwrap();
+    assert_eq!(db.count_flagged().unwrap(), 0);
 
     let detail = db.message_detail(only_one[0].id).unwrap().unwrap();
     assert_eq!(detail.summary.from, "one@x.y");

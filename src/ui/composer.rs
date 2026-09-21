@@ -14,11 +14,68 @@ pub struct SendRequest {
     pub body: String,
 }
 
+/// What the composer opens with. A blank one is a new message; `reply_to`
+/// fills it in from an open message.
+#[derive(Debug, Clone, Default)]
+pub struct Prefill {
+    pub to: String,
+    pub subject: String,
+    pub body: String,
+}
+
+impl Prefill {
+    /// A reply: their address, `Re:` once and only once, and the message
+    /// quoted underneath with a blank line to type into above it.
+    pub fn reply_to(detail: &crate::models::MessageDetail) -> Self {
+        let subject = detail.summary.subject.trim();
+        let subject = if subject.to_lowercase().starts_with("re:") {
+            subject.to_string()
+        } else {
+            format!("Re: {subject}")
+        };
+        let quoted: String = detail
+            .body_text
+            .lines()
+            .take(QUOTE_LINES)
+            .map(|line| format!("> {line}\n"))
+            .collect();
+        Self {
+            to: crate::ui::mailbox::sender_address(&detail.summary.from),
+            subject,
+            body: format!(
+                "\n\nOn {}, {} wrote:\n{quoted}",
+                detail
+                    .summary
+                    .date
+                    .map(|d| d
+                        .with_timezone(&chrono::Local)
+                        .format("%b %-d, %Y at %-I:%M %p")
+                        .to_string())
+                    .unwrap_or_else(|| "an earlier date".to_string()),
+                crate::ui::mailbox::display_sender(&detail.summary.from),
+            ),
+        }
+    }
+}
+
+/// How much of the original a reply quotes. Long enough to give context,
+/// short enough that the reply window is not someone else's newsletter.
+const QUOTE_LINES: usize = 40;
+
 /// Open the composer over `ui.window`. `on_send` is called once, with the
 /// finished message, if the user sends; the dialog closes itself either way.
-pub fn present(accounts: &[String], ui: &Ui, on_send: impl Fn(SendRequest) + 'static) {
+pub fn present(
+    accounts: &[String],
+    prefill: Prefill,
+    ui: &Ui,
+    on_send: impl Fn(SendRequest) + 'static,
+) {
     let dialog = adw::Dialog::new();
-    dialog.set_title("New message");
+    dialog.set_title(if prefill.subject.is_empty() {
+        "New message"
+    } else {
+        "Reply"
+    });
     dialog.set_content_width(620);
     dialog.set_content_height(520);
 
@@ -41,8 +98,10 @@ pub fn present(accounts: &[String], ui: &Ui, on_send: impl Fn(SendRequest) + 'st
     fields.add(&from);
 
     let to = adw::EntryRow::builder().title("To").build();
+    to.set_text(&prefill.to);
     fields.add(&to);
     let subject = adw::EntryRow::builder().title("Subject").build();
+    subject.set_text(&prefill.subject);
     fields.add(&subject);
     content.append(&fields);
 
@@ -54,6 +113,10 @@ pub fn present(accounts: &[String], ui: &Ui, on_send: impl Fn(SendRequest) + 'st
         .bottom_margin(10)
         .build();
     body.add_css_class("compose");
+    body.buffer().set_text(&prefill.body);
+    // A reply starts with two blank lines above the quote; put the cursor in
+    // them rather than at the end of somebody else's words.
+    body.buffer().place_cursor(&body.buffer().start_iter());
     let body_frame = theme::card();
     body_frame.append(&body);
     let scroller = gtk::ScrolledWindow::builder()

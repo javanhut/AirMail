@@ -64,6 +64,7 @@ pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<String>> {
 pub struct FetchedMessage {
     pub uid: u32,
     pub seen: bool,
+    pub flagged: bool,
     pub raw: Vec<u8>,
 }
 
@@ -94,8 +95,16 @@ pub async fn fetch_messages(
             let seen = f
                 .flags()
                 .any(|fl| matches!(fl, async_imap::types::Flag::Seen));
+            let flagged = f
+                .flags()
+                .any(|fl| matches!(fl, async_imap::types::Flag::Flagged));
             let raw = f.body().map(<[u8]>::to_vec)?;
-            Some(FetchedMessage { uid, seen, raw })
+            Some(FetchedMessage {
+                uid,
+                seen,
+                flagged,
+                raw,
+            })
         })
         .collect())
 }
