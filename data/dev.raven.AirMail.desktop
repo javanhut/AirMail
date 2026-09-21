@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=AirMail
+GenericName=Mail Client
+Comment=All your inboxes. One place.
+Exec=airmail
+Icon=dev.raven.AirMail
+Terminal=false
+Categories=Network;Email;GTK;
+Keywords=Email;Mail;IMAP;SMTP;Inbox;
+StartupNotify=true
+# Must match the application id passed to adw::Application, or the compositor
+# cannot tell which launcher the window belongs to.
+StartupWMClass=dev.raven.AirMail

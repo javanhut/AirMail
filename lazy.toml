@@ -3,32 +3,117 @@
 [settings]
 default = "build"
 
+[variables]
+# Where `install` puts things. `$HOME/.local` needs no root and is picked up by
+# the desktop automatically; override per run, e.g.
+#     imlazy install prefix=/usr/local
+prefix = "$HOME/.local"
+
 [commands]
 
 [commands.build]
 desc = "Build airmail"
+alias = ["b"]
 run = ["cargo build"]
+watch = ["src/**/*.rs", "Cargo.toml"]
+
+[commands.release]
+desc = "Build airmail with optimisations"
+run = ["cargo build --release"]
 
 [commands.run]
-desc = "Run airmail GUI"
+desc = "Run the airmail GUI"
+alias = ["r"]
+run = ["cargo run"]
+watch = ["src/**/*.rs", "Cargo.toml"]
+
+[commands.debug]
+desc = "Run the GUI with airmail's own tracing turned up"
+env = { RUST_LOG = "airmail=debug,info" }
+run = ["cargo run"]
+
+[commands.inspector]
+desc = "Run the GUI with the GTK Inspector attached (widget tree, CSS, live styles)"
+env = { GTK_DEBUG = "interactive" }
+run = ["cargo run"]
+
+[commands.strict]
+desc = "Run the GUI with GTK criticals made fatal — a UI smoke test with a window"
+env = { G_DEBUG = "fatal-criticals" }
 run = ["cargo run"]
 
 [commands.check]
-desc = "Type-check"
-run = ["cargo check"]
+desc = "Type-check everything, tests included"
+alias = ["c"]
+run = ["cargo check --all-targets"]
+watch = ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml"]
 
 [commands.clippy]
 desc = "Lint with warnings as errors"
+alias = ["l", "lint"]
 run = ["cargo clippy --all-targets -- -D warnings"]
 
 [commands.fmt]
 desc = "Format code"
+alias = ["f"]
 run = ["cargo fmt"]
+
+[commands.fmt-check]
+desc = "Check formatting without rewriting anything"
+run = ["cargo fmt --check"]
 
 [commands.test]
 desc = "Run tests"
+alias = ["t"]
 run = ["cargo test"]
+watch = ["src/**/*.rs", "tests/**/*.rs"]
+
+[commands.test-ui]
+desc = "Run only the UI tests (setup form, palette) — no display needed"
+run = ["cargo test --test ui_smoke"]
+
+[commands.gate]
+desc = "Everything CI would check: formatting, lints, tests"
+alias = ["ci"]
+dep = ["fmt-check", "clippy", "test"]
+run = ["echo 'gate: formatting, lints and tests all pass'"]
 
 [commands.doctor]
 desc = "Check IMAP/SMTP connectivity for all configured accounts"
 run = ["cargo run -- --doctor"]
+
+[commands.deps]
+desc = "Show the GTK/libadwaita versions this build links against"
+run = [
+  "pkg-config --modversion gtk4 libadwaita-1",
+  "cargo tree --depth 1",
+]
+
+[commands.install]
+desc = "Install the binary, desktop entry and icon (override: prefix=/usr/local)"
+dep = ["release"]
+run = [
+  "install -Dm755 target/release/airmail {{prefix}}/bin/airmail",
+  "install -Dm644 data/icons/hicolor/scalable/apps/dev.raven.AirMail.svg {{prefix}}/share/icons/hicolor/scalable/apps/dev.raven.AirMail.svg",
+  "install -Dm644 data/dev.raven.AirMail.desktop {{prefix}}/share/applications/dev.raven.AirMail.desktop",
+  # The entry ships with a bare `Exec=airmail`; point it at wherever it landed.
+  "sed -i 's|^Exec=airmail$|Exec={{prefix}}/bin/airmail|' {{prefix}}/share/applications/dev.raven.AirMail.desktop",
+  "desktop-file-validate {{prefix}}/share/applications/dev.raven.AirMail.desktop",
+  "update-desktop-database {{prefix}}/share/applications || true",
+  "gtk4-update-icon-cache -qtf {{prefix}}/share/icons/hicolor || true",
+  "echo 'AirMail installed to {{prefix}} — it should now show up in your launcher'",
+]
+
+[commands.uninstall]
+desc = "Remove an installed AirMail — accounts and cached mail are left alone"
+run = [
+  "rm -f {{prefix}}/bin/airmail",
+  "rm -f {{prefix}}/share/applications/dev.raven.AirMail.desktop",
+  "rm -f {{prefix}}/share/icons/hicolor/scalable/apps/dev.raven.AirMail.svg",
+  "update-desktop-database {{prefix}}/share/applications || true",
+  "echo 'Removed AirMail from {{prefix}}. Your accounts (~/.config/airmail) and mail (~/.local/share/airmail) are untouched.'",
+]
+
+[commands.clean]
+desc = "Remove build artefacts"
+run = ["cargo clean"]
