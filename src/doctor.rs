@@ -27,8 +27,8 @@ pub async fn run() -> Result<()> {
 }
 
 async fn check(cfg: &AccountConfig) -> Result<String> {
-    let password = crate::config::get_password(&cfg.email)
-        .context("no password in keyring — add the account through the GUI first")?;
+    let password =
+        crate::config::get_password(&cfg.email).context("add the account through the GUI first")?;
 
     let mut session = crate::sync::imap::connect(cfg, &password).await?;
     let folders = crate::sync::imap::list_folders(&mut session).await?;

@@ -1,6 +1,7 @@
 pub mod config;
 pub mod db;
 pub mod doctor;
+pub mod keyring;
 pub mod mailparse;
 pub mod models;
 pub mod providers;

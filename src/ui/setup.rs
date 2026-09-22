@@ -331,7 +331,7 @@ pub fn present(ui: &Ui, on_save: impl Fn(AccountConfig, String) + 'static) {
     content.append(&error);
 
     let footer = gtk::Label::new(Some(
-        "Your password is stored in the system keyring, never on disk.",
+        "Your password is stored in HuginnKeyring, the system keyring, never on disk.",
     ));
     footer.add_css_class("small");
     footer.add_css_class("faint");

@@ -6,8 +6,6 @@ use directories::ProjectDirs;
 
 use crate::models::AccountConfig;
 
-const SERVICE: &str = "dev.airmail";
-
 fn project_dirs() -> Result<ProjectDirs> {
     ProjectDirs::from("dev", "AirMail", "airmail").context("cannot determine config directory")
 }
@@ -68,18 +66,20 @@ pub fn delete_account(email: &str) -> Result<()> {
     if path.exists() {
         fs::remove_file(&path)?;
     }
-    let _ = keyring::Entry::new(SERVICE, email).and_then(|e| e.delete_credential());
+    // The account is gone from disk either way; a keyring that refuses -- a
+    // locked one, a daemon that is not running -- must not make that look like
+    // a failure to remove the account. It does get said out loud, though,
+    // because the leftover is a password for a mailbox the user just dropped.
+    if let Err(e) = crate::keyring::delete(email) {
+        tracing::warn!("could not remove the stored password for {email}: {e:#}");
+    }
     Ok(())
 }
 
 pub fn store_password(email: &str, password: &str) -> Result<()> {
-    keyring::Entry::new(SERVICE, email)
-        .and_then(|e| e.set_password(password))
-        .context("storing password in the OS keyring (is a secret-service provider available?)")
+    crate::keyring::store(email, password).context("storing the password in the keyring")
 }
 
 pub fn get_password(email: &str) -> Result<String> {
-    keyring::Entry::new(SERVICE, email)
-        .and_then(|e| e.get_password())
-        .with_context(|| format!("no stored password for {email}"))
+    crate::keyring::get(email)
 }

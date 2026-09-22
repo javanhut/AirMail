@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Static connection settings for one email account, persisted as TOML.
-/// The password is never stored here — it lives in the OS keyring.
+/// The password is never stored here — it lives in HuginnKeyring.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountConfig {
     pub email: String,

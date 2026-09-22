@@ -12,7 +12,24 @@ directories = "6.0.0"
 gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }
 adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
 futures = "0.3.34"
-keyring = "4.2.0"
+# Raven's keyring, spoken to directly over its native socket rather than
+# through the `keyring` crate and the Secret Service bus. Both roads end at the
+# same daemon -- huginn-keyringd is what owns `org.freedesktop.secrets` here --
+# so this is not about reaching something that was out of reach. It is about
+# what comes back when it does not work. A locked login keyring arrives over
+# D-Bus as a `Prompt` object path, which a mail client can do nothing with but
+# print; it arrives over the native protocol as `Locked`, which is an answer a
+# person can be told what to do about.
+#
+# It also takes zbus, the secret-service client and an ephemeral
+# Diffie-Hellman session handshake out of the build. None of that was earning
+# its place in a program that moves one string per account.
+#
+# Not a path dependency, and deliberately unpinned: HuginnKeyring is its own
+# repository with nothing tagged in it yet, so a `rev` here would be the commit
+# every future build fetches. This is how RavenLogin depends on the same crate
+# -- see its crates/ravend/Cargo.toml.
+huginn-wire = { git = "https://github.com/javanhut/HuginnKeyring.git" }
 lettre = { version = "0.11.23", features = ["builder", "pool", "smtp-transport", "tokio1", "tokio1-rustls-tls"], default-features = false }
 mail-parser = "0.11.9"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
@@ -26,3 +43,25 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 webpki-roots = "1.0.9"
 
+
+[profile.release]
+# Nothing in this application is hot, and the profile should say so rather
+# than imply otherwise by looking like the compositor's. A mail client waits:
+# on the IMAP server, on the network, on SQLite's fsync. The two places that
+# do real CPU work are mail-parser walking a large mailbox and rustls's
+# handshakes, and both are already inside a round trip that costs more than
+# they do.
+#
+# So the house default is exactly right here, and it is here for consistency
+# and for the size that comes with it rather than for speed. Thin LTO and one
+# codegen unit are what every warm GTK client in the tree carries -- the
+# store, the settings app, the viewer, the camera -- and this is one of those,
+# not one of the per-frame programs that take `fat`.
+#
+# One thing worth knowing before anyone reads a size number off this: rusqlite
+# is `features = ["bundled"]`, so SQLite is a C library compiled in-tree, and
+# no Rust LTO setting reaches it. A meaningful part of this binary is outside
+# everything decided in this table.
+opt-level = 3
+lto = "thin"
+codegen-units = 1
