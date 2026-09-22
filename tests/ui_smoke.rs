@@ -2,9 +2,11 @@
 //!
 //! The GTK UI cannot be instantiated without a display, so the parts worth
 //! testing are the ones that hold no widgets: `SetupForm`, which decides what
-//! an address implies and what it saves, and the pure helpers in `theme`.
+//! an address implies and what it saves, `NewKeyring`, which decides whether
+//! two typed passwords are worth sending, and the pure helpers in `theme`.
 
 use airmail::models::SmtpSecurity;
+use airmail::ui::keyring_setup::NewKeyring;
 use airmail::ui::setup::{Choice, SetupForm};
 use airmail::ui::theme;
 
@@ -142,4 +144,33 @@ fn the_stylesheet_covers_every_avatar_colour() {
         css.matches('}').count(),
         "unbalanced braces in the stylesheet"
     );
+}
+
+#[test]
+fn a_new_keyring_needs_both_fields() {
+    let empty = NewKeyring::default();
+    assert!(!empty.is_complete(), "nothing typed yet");
+    assert!(empty.validate().is_err());
+
+    let half_typed = NewKeyring {
+        password: "hunter2".into(),
+        again: String::new(),
+    };
+    assert!(!half_typed.is_complete(), "the second field is still empty");
+}
+
+#[test]
+fn a_new_keyring_says_when_the_two_disagree() {
+    let mut form = NewKeyring {
+        password: "hunter2".into(),
+        again: "hunter3".into(),
+    };
+
+    // Complete, so the button is live -- the complaint belongs in a sentence,
+    // not in a button that greys itself out while the user is still typing.
+    assert!(form.is_complete());
+    assert_eq!(form.validate(), Err("Those two passwords do not match."));
+
+    form.again = "hunter2".into();
+    assert_eq!(form.validate(), Ok("hunter2"));
 }

@@ -1,5 +1,6 @@
 pub mod composer;
 pub mod contact;
+pub mod keyring_setup;
 pub mod mailbox;
 pub mod message_object;
 pub mod setup;
@@ -707,13 +708,49 @@ pub fn pump_send_outcomes(
 /// Persist a finished setup dialog: TOML on disk, password in the keyring,
 /// row in the database, then restart syncing so mail starts arriving.
 pub fn add_account(state: &Rc<RefCell<AppState>>, ui: &Ui, cfg: &AccountConfig, password: &str) {
+    match config::store_password(&cfg.email, password) {
+        Ok(()) => {}
+        // Nothing on this computer to store into yet. Offer to make one, and
+        // come back to the top of this function once there is -- rather than
+        // carrying on and writing an account whose password went nowhere.
+        Err(crate::keyring::Error::NoKeyring) => {
+            let retry = {
+                let state = state.clone();
+                let ui = ui.clone();
+                let cfg = cfg.clone();
+                let password = password.to_string();
+                move || add_account(&state, &ui, &cfg, &password)
+            };
+            let dismissed = {
+                let state = state.clone();
+                let ui = ui.clone();
+                let email = cfg.email.clone();
+                move || {
+                    let message = format!(
+                        "{email} was not added — it needs a keyring to store its password in"
+                    );
+                    set_status(&state, &ui, message, true);
+                }
+            };
+            keyring_setup::present(ui, retry, dismissed);
+            return;
+        }
+        Err(e) => {
+            let e = anyhow::Error::from(e);
+            set_status(
+                state,
+                ui,
+                format!("Could not store the password: {e:#}"),
+                true,
+            );
+            return;
+        }
+    }
+
     let stored = {
         let state_ref = state.borrow();
-        config::store_password(&cfg.email, password)
-            .map_err(|e| format!("Could not store the password: {e:#}"))
-            .and_then(|()| {
-                config::save_account(cfg).map_err(|e| format!("Could not save the account: {e:#}"))
-            })
+        config::save_account(cfg)
+            .map_err(|e| format!("Could not save the account: {e:#}"))
             .and_then(|()| {
                 state_ref
                     .db

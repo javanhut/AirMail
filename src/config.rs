@@ -76,10 +76,13 @@ pub fn delete_account(email: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn store_password(email: &str, password: &str) -> Result<()> {
-    crate::keyring::store(email, password).context("storing the password in the keyring")
+/// Errors come back as the keyring's own type rather than flattened into
+/// `anyhow`, because the caller has an offer to make when the answer is
+/// [`crate::keyring::Error::NoKeyring`] and nothing to say about the rest.
+pub fn store_password(email: &str, password: &str) -> Result<(), crate::keyring::Error> {
+    crate::keyring::store(email, password)
 }
 
 pub fn get_password(email: &str) -> Result<String> {
-    crate::keyring::get(email)
+    Ok(crate::keyring::get(email)?)
 }
