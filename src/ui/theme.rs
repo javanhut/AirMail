@@ -90,6 +90,15 @@ window.airmail, .bg-deep {{ background-color: {BG_DEEP}; color: {TEXT}; }}
     border-radius: {RADIUS}px;
 }}
 
+/* An HTML message: a white page, because that is what senders design for,
+   with the same outline and corners as the plain-text card. */
+.html-card {{
+    background-color: #ffffff;
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS}px;
+}}
+.images-bar {{ padding: 2px 4px; }}
+
 /* The three mail columns are separated by a hairline rather than by GTK's
    default panel shadow, which is invisible at these values anyway. */
 .column-edge {{ border-left: 1px solid {BORDER_SOFT}; }}

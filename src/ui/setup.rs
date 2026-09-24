@@ -13,7 +13,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use anyhow::{Context, Result};
 
-use crate::models::{AccountConfig, SmtpSecurity};
+use crate::models::{AccountConfig, OAuthProvider, SmtpSecurity};
 use crate::providers::{self, Provider};
 use crate::ui::{Ui, theme};
 
@@ -48,6 +48,10 @@ pub struct SetupForm {
     email: String,
     password: String,
     custom: CustomServers,
+    /// Providers this machine has a client ID for, so they sign in through
+    /// the browser instead of taking a password. Empty by default, which keeps
+    /// the form's behaviour independent of whatever `oauth.toml` holds.
+    browser_sign_in: Vec<OAuthProvider>,
 }
 
 impl Default for SetupForm {
@@ -61,11 +65,38 @@ impl Default for SetupForm {
                 derived: true,
                 ..Default::default()
             },
+            browser_sign_in: Vec::new(),
         }
     }
 }
 
 impl SetupForm {
+    /// A form that offers browser sign-in wherever this machine can do it.
+    pub fn for_this_machine() -> Self {
+        Self::default().with_browser_sign_in(
+            [OAuthProvider::Google, OAuthProvider::Microsoft]
+                .into_iter()
+                .filter(|p| crate::oauth::is_configured(*p))
+                .collect(),
+        )
+    }
+
+    pub fn with_browser_sign_in(mut self, providers: Vec<OAuthProvider>) -> Self {
+        self.browser_sign_in = providers;
+        self
+    }
+
+    /// The provider to sign in to through the browser, when the chosen host
+    /// offers it here. `None` means the form wants a password.
+    pub fn browser_provider(&self) -> Option<OAuthProvider> {
+        match self.choice {
+            Some(Choice::Known(provider)) => {
+                provider.oauth.filter(|p| self.browser_sign_in.contains(p))
+            }
+            _ => None,
+        }
+    }
+
     pub fn choice(&self) -> Option<Choice> {
         self.choice
     }
@@ -80,15 +111,30 @@ impl SetupForm {
 
     /// True when the dialog has enough to try saving.
     pub fn is_ready(&self) -> bool {
-        self.choice.is_some() && !self.email.trim().is_empty() && !self.password.is_empty()
+        self.choice.is_some()
+            && !self.email.trim().is_empty()
+            && (self.browser_provider().is_some() || !self.password.is_empty())
     }
 
-    /// The hint shown under the password field, for providers that want an app
-    /// password rather than the one used to sign in on the web.
-    pub fn hint(&self) -> Option<&'static str> {
-        match self.choice {
-            Some(Choice::Known(provider)) => provider.hint,
-            _ => None,
+    /// The hint shown under the password field, as Pango markup: what the
+    /// provider wants instead of the web password and, where browser sign-in
+    /// exists but is not set up on this machine, how to set it up.
+    pub fn hint(&self) -> Option<String> {
+        if self.browser_provider().is_some() {
+            return Some(
+                "You'll sign in in your browser. AirMail never sees your password.".into(),
+            );
+        }
+        let Some(Choice::Known(provider)) = self.choice else {
+            return None;
+        };
+        let password = provider
+            .hint
+            .map(|text| gtk::glib::markup_escape_text(text).to_string());
+        let setup = provider.oauth.map(|oauth| oauth.setup_steps().to_string());
+        match (password, setup) {
+            (Some(password), Some(setup)) => Some(format!("{password}\n\n{setup}")),
+            (one, other) => one.or(other),
         }
     }
 
@@ -158,7 +204,7 @@ impl SetupForm {
         if providers::domain_of(&self.email).is_none() {
             anyhow::bail!("enter a full email address, like you@example.com");
         }
-        if self.password.is_empty() {
+        if self.password.is_empty() && self.browser_provider().is_none() {
             anyhow::bail!("a password is required");
         }
         match self.choice {
@@ -185,12 +231,18 @@ impl SetupForm {
         }
     }
 
-    /// The finished account plus the password to hand to the keyring.
+    /// The finished account plus the password to hand to the keyring. For a
+    /// browser sign-in the password is empty and `oauth` is set; the refresh
+    /// token takes its place once the browser comes back.
     pub fn save(self) -> Result<(AccountConfig, String)> {
         self.validate()?;
         let email = self.email.trim().to_string();
+        let browser = self.browser_provider();
         let config = match self.choice {
-            Some(Choice::Known(provider)) => provider.account_config(&email),
+            Some(Choice::Known(provider)) => AccountConfig {
+                oauth: browser,
+                ..provider.account_config(&email)
+            },
             Some(Choice::Other) => AccountConfig {
                 imap_host: self.custom.imap_host.trim().to_string(),
                 imap_port: self.custom.imap_port.trim().parse()?,
@@ -201,7 +253,12 @@ impl SetupForm {
             },
             None => anyhow::bail!("choose where this mail is hosted"),
         };
-        Ok((config, self.password))
+        let password = if browser.is_some() {
+            String::new()
+        } else {
+            self.password
+        };
+        Ok((config, password))
     }
 }
 
@@ -225,7 +282,7 @@ fn label_for(choice: Choice) -> &'static str {
 /// Open the setup dialog over `ui.window`. `on_save` receives the finished
 /// account and its password.
 pub fn present(ui: &Ui, on_save: impl Fn(AccountConfig, String) + 'static) {
-    let form = Rc::new(RefCell::new(SetupForm::default()));
+    let form = Rc::new(RefCell::new(SetupForm::for_this_machine()));
     // Set while the code writes into the entries, so the handlers below can
     // tell a programmatic update from something the user typed.
     let updating = Rc::new(Cell::new(false));
@@ -331,7 +388,7 @@ pub fn present(ui: &Ui, on_save: impl Fn(AccountConfig, String) + 'static) {
     content.append(&error);
 
     let footer = gtk::Label::new(Some(
-        "Your password is stored in HuginnKeyring, the system keyring, never on disk.",
+        "Your password or sign-in is stored in HuginnKeyring, the system keyring, never on disk.",
     ));
     footer.add_css_class("small");
     footer.add_css_class("faint");
@@ -364,6 +421,7 @@ pub fn present(ui: &Ui, on_save: impl Fn(AccountConfig, String) + 'static) {
         let smtp_host = smtp_host.clone();
         let smtp_port = smtp_port.clone();
         let security = security.clone();
+        let password = password.clone();
         Rc::new(move || {
             let form = form.borrow();
             updating.set(true);
@@ -394,11 +452,18 @@ pub fn present(ui: &Ui, on_save: impl Fn(AccountConfig, String) + 'static) {
 
             match form.hint() {
                 Some(text) => {
-                    hint.set_text(text);
+                    hint.set_markup(&text);
                     hint.set_visible(true);
                 }
                 None => hint.set_visible(false),
             }
+
+            let browser = form.browser_provider();
+            password.set_visible(browser.is_none());
+            add.set_label(&match browser {
+                Some(provider) => format!("Sign in with {}", provider.label()),
+                None => "Add account".to_string(),
+            });
 
             add.set_sensitive(form.is_ready());
             updating.set(false);

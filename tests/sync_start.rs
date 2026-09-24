@@ -20,6 +20,7 @@ fn account() -> AccountConfig {
         smtp_host: "smtp.example.invalid".to_string(),
         smtp_port: 465,
         smtp_security: SmtpSecurity::Tls,
+        oauth: None,
     }
 }
 

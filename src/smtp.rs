@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
 use lettre::message::{Mailbox as LettreMailbox, MessageBuilder};
-use lettre::transport::smtp::authentication::Credentials;
+use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
 use crate::models::{AccountConfig, SmtpSecurity};
+use crate::oauth::Login;
 
 pub struct SentMessage {
     /// Raw RFC822 of the sent message, for IMAP APPEND to Sent.
@@ -13,7 +14,7 @@ pub struct SentMessage {
 /// Send a plain-text message through the account's SMTP server.
 pub async fn send(
     cfg: &AccountConfig,
-    password: &str,
+    login: &Login,
     to: &str,
     subject: &str,
     body: &str,
@@ -33,7 +34,7 @@ pub async fn send(
         .body(body.to_string())?;
 
     let raw = message.formatted().to_vec();
-    transport(cfg, password)?
+    transport(cfg, login)?
         .send(message)
         .await
         .context("SMTP send failed")?;
@@ -43,7 +44,7 @@ pub async fn send(
 /// Build an SMTP transport matching the account's encryption: implicit TLS
 /// (SMTPS, port 465) or a plain connection upgraded with STARTTLS (port 587).
 /// Office 365 and iCloud only offer the latter.
-fn transport(cfg: &AccountConfig, password: &str) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
+fn transport(cfg: &AccountConfig, login: &Login) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
     let builder = match cfg.smtp_security {
         SmtpSecurity::Tls => AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.smtp_host),
         SmtpSecurity::StartTls => {
@@ -52,18 +53,20 @@ fn transport(cfg: &AccountConfig, password: &str) -> Result<AsyncSmtpTransport<T
     }
     .with_context(|| format!("invalid SMTP host {:?}", cfg.smtp_host))?;
 
-    Ok(builder
-        .port(cfg.smtp_port)
-        .credentials(Credentials::new(
-            cfg.imap_username().to_string(),
-            password.to_string(),
-        ))
-        .build())
+    let user = cfg.imap_username().to_string();
+    let builder = builder.port(cfg.smtp_port);
+    Ok(match login {
+        Login::Password(password) => builder.credentials(Credentials::new(user, password.clone())),
+        Login::Bearer(token) => builder
+            .credentials(Credentials::new(user, token.clone()))
+            .authentication(vec![Mechanism::Xoauth2]),
+    }
+    .build())
 }
 
 /// Check IMAP login and SMTP connectivity for every configured account.
-pub async fn check_account(cfg: &AccountConfig, password: &str) -> Result<()> {
-    transport(cfg, password)?
+pub async fn check_account(cfg: &AccountConfig, login: &Login) -> Result<()> {
+    transport(cfg, login)?
         .test_connection()
         .await
         .context("SMTP connection/auth failed")?;

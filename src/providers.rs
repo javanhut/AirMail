@@ -3,7 +3,7 @@
 //! Setup asks for a provider and an address; everything an IMAP/SMTP client
 //! needs is filled in from this table, so nobody has to know what a port is.
 
-use crate::models::{AccountConfig, SmtpSecurity};
+use crate::models::{AccountConfig, OAuthProvider, SmtpSecurity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Provider {
@@ -18,6 +18,9 @@ pub struct Provider {
     /// Shown under the password field when the provider wants something other
     /// than the password used to sign in on the web.
     pub hint: Option<&'static str>,
+    /// Browser sign-in, when the provider offers it and a client ID for it is
+    /// configured. The password hint is for when it is not.
+    pub oauth: Option<OAuthProvider>,
 }
 
 const APP_PASSWORD: &str = "This provider rejects your normal password. Create an app password in your account's security settings and paste it here.";
@@ -34,6 +37,7 @@ pub const PROVIDERS: &[Provider] = &[
         hint: Some(
             "Gmail needs an app password: Google Account → Security → 2-Step Verification → App passwords.",
         ),
+        oauth: Some(OAuthProvider::Google),
     },
     Provider {
         name: "Outlook",
@@ -52,6 +56,7 @@ pub const PROVIDERS: &[Provider] = &[
         hint: Some(
             "If your Microsoft account uses two-step verification, create an app password instead of your sign-in password.",
         ),
+        oauth: Some(OAuthProvider::Microsoft),
     },
     Provider {
         name: "Yahoo",
@@ -68,6 +73,7 @@ pub const PROVIDERS: &[Provider] = &[
         smtp_port: 465,
         smtp_security: SmtpSecurity::Tls,
         hint: Some(APP_PASSWORD),
+        oauth: None,
     },
     Provider {
         name: "iCloud",
@@ -80,6 +86,7 @@ pub const PROVIDERS: &[Provider] = &[
         hint: Some(
             "iCloud only accepts app-specific passwords: appleid.apple.com → Sign-In and Security → App-Specific Passwords.",
         ),
+        oauth: None,
     },
     Provider {
         name: "Fastmail",
@@ -90,6 +97,7 @@ pub const PROVIDERS: &[Provider] = &[
         smtp_port: 465,
         smtp_security: SmtpSecurity::Tls,
         hint: Some(APP_PASSWORD),
+        oauth: None,
     },
     Provider {
         name: "Zoho",
@@ -100,6 +108,7 @@ pub const PROVIDERS: &[Provider] = &[
         smtp_port: 465,
         smtp_security: SmtpSecurity::Tls,
         hint: None,
+        oauth: None,
     },
     Provider {
         name: "AOL",
@@ -110,6 +119,7 @@ pub const PROVIDERS: &[Provider] = &[
         smtp_port: 465,
         smtp_security: SmtpSecurity::Tls,
         hint: Some(APP_PASSWORD),
+        oauth: None,
     },
     Provider {
         name: "GMX",
@@ -122,6 +132,7 @@ pub const PROVIDERS: &[Provider] = &[
         hint: Some(
             "GMX needs IMAP switched on first: web mail → Settings → POP3 & IMAP → enable access.",
         ),
+        oauth: None,
     },
 ];
 
@@ -156,6 +167,7 @@ impl Provider {
             smtp_host: self.smtp_host.to_string(),
             smtp_port: self.smtp_port,
             smtp_security: self.smtp_security,
+            oauth: None,
         }
     }
 }
@@ -182,6 +194,7 @@ pub fn guess_config(email: &str) -> AccountConfig {
         },
         smtp_port: 465,
         smtp_security: SmtpSecurity::Tls,
+        oauth: None,
     }
 }
 

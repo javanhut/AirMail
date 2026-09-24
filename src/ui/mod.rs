@@ -1,5 +1,6 @@
 pub mod composer;
 pub mod contact;
+pub mod html_view;
 pub mod keyring_setup;
 pub mod mailbox;
 pub mod message_object;
@@ -563,19 +564,13 @@ async fn send_task(request: SendRequest) -> Result<()> {
         .into_iter()
         .find(|a| a.email == request.account_email)
         .with_context(|| format!("account {:?} no longer exists", request.account_email))?;
-    let password = config::get_password(&cfg.email)?;
+    let login = crate::oauth::login_for(&cfg).await?;
 
-    let sent = crate::smtp::send(
-        &cfg,
-        &password,
-        &request.to,
-        &request.subject,
-        &request.body,
-    )
-    .await
-    .context("sending")?;
+    let sent = crate::smtp::send(&cfg, &login, &request.to, &request.subject, &request.body)
+        .await
+        .context("sending")?;
 
-    match crate::sync::imap::connect(&cfg, &password).await {
+    match crate::sync::imap::connect(&cfg, &login).await {
         Ok(mut session) => {
             let db = tokio::task::spawn_blocking({
                 let db_path = config::db_path();
@@ -708,6 +703,15 @@ pub fn pump_send_outcomes(
 /// Persist a finished setup dialog: TOML on disk, password in the keyring,
 /// row in the database, then restart syncing so mail starts arriving.
 pub fn add_account(state: &Rc<RefCell<AppState>>, ui: &Ui, cfg: &AccountConfig, password: &str) {
+    // A browser sign-in arrives with no password yet; the refresh token that
+    // comes back from the browser is what goes in the keyring.
+    if let Some(provider) = cfg.oauth
+        && password.is_empty()
+    {
+        sign_in_then_add(state, ui, cfg, provider);
+        return;
+    }
+
     match config::store_password(&cfg.email, password) {
         Ok(()) => {}
         // Nothing on this computer to store into yet. Offer to make one, and
@@ -774,6 +778,67 @@ pub fn add_account(state: &Rc<RefCell<AppState>>, ui: &Ui, cfg: &AccountConfig, 
     pump_sync_events(sync_rx, state, ui);
     refresh_all(state, ui);
     set_status(state, ui, format!("Added {} — syncing", cfg.email), true);
+}
+
+/// Open the provider's sign-in page, wait for the browser to come back, then
+/// add the account with the refresh token in place of a password.
+fn sign_in_then_add(
+    state: &Rc<RefCell<AppState>>,
+    ui: &Ui,
+    cfg: &AccountConfig,
+    provider: crate::models::OAuthProvider,
+) {
+    let pending = match crate::oauth::Pending::start(provider, &cfg.email) {
+        Ok(pending) => pending,
+        Err(e) => {
+            set_status(state, ui, format!("Could not start sign-in: {e:#}"), true);
+            return;
+        }
+    };
+    if let Err(e) = gtk::gio::AppInfo::launch_default_for_uri(
+        pending.url(),
+        None::<&gtk::gio::AppLaunchContext>,
+    ) {
+        // Still waiting: the link can be opened by hand.
+        tracing::warn!(
+            "could not open the browser ({e}); sign in at {}",
+            pending.url()
+        );
+        set_status(
+            state,
+            ui,
+            format!("Open this link to sign in: {}", pending.url()),
+            true,
+        );
+    } else {
+        set_status(
+            state,
+            ui,
+            format!(
+                "Finish signing in to {} with {} in your browser…",
+                cfg.email,
+                provider.label()
+            ),
+            true,
+        );
+    }
+
+    let task = state.borrow().runtime.spawn(pending.finish());
+    let state = state.clone();
+    let ui = ui.clone();
+    let cfg = cfg.clone();
+    gtk::glib::MainContext::default().spawn_local(async move {
+        match task.await {
+            Ok(Ok(refresh_token)) => add_account(&state, &ui, &cfg, &refresh_token),
+            Ok(Err(e)) => set_status(
+                &state,
+                &ui,
+                format!("{} was not added: {e:#}", cfg.email),
+                true,
+            ),
+            Err(e) => set_status(&state, &ui, format!("Sign-in stopped: {e}"), true),
+        }
+    });
 }
 
 /// Forget an account: config file, keyring entry and every cached message.
@@ -1249,11 +1314,7 @@ fn menu_item(icon: &str, label: &str) -> gtk::Button {
 }
 
 /// Ctrl+K and Ctrl+N, the two shortcuts the window advertises on its face.
-fn install_shortcuts(
-    window: &adw::ApplicationWindow,
-    state: &Rc<RefCell<AppState>>,
-    ui: &Ui,
-) {
+fn install_shortcuts(window: &adw::ApplicationWindow, state: &Rc<RefCell<AppState>>, ui: &Ui) {
     let controller = gtk::ShortcutController::new();
     controller.set_scope(gtk::ShortcutScope::Global);
 

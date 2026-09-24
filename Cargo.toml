@@ -12,6 +12,15 @@ directories = "6.0.0"
 gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }
 adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
 futures = "0.3.34"
+# Browser sign-in (src/oauth.rs): PKCE needs a hash, a base64url encoding and
+# some randomness; the token endpoints need one HTTPS POST each. ureq brings no
+# crypto provider of its own and uses the one `main` installs.
+base64 = "0.22.1"
+getrandom = "0.4"
+sha2 = "0.10.9"
+serde_json = "1"
+ureq = { version = "3.4.2", default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots"] }
+url = "2.5.8"
 # Raven's keyring, spoken to directly over its native socket rather than
 # through the `keyring` crate and the Secret Service bus. Both roads end at the
 # same daemon -- huginn-keyringd is what owns `org.freedesktop.secrets` here --
@@ -32,6 +41,10 @@ futures = "0.3.34"
 huginn-wire = { git = "https://github.com/javanhut/HuginnKeyring.git" }
 lettre = { version = "0.11.23", features = ["builder", "pool", "smtp-transport", "tokio1", "tokio1-rustls-tls"], default-features = false }
 mail-parser = "0.11.9"
+# HTML mail in the reading pane (src/ui/html_view.rs). Needs the system's
+# webkitgtk-6.0; 0.6 is the release built on the same gtk4 0.11 as above.
+# Scripts are off and the network is closed to it -- see src/html.rs.
+webkit6 = "0.6.1"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rustls-pki-types = "1.15.1"
 serde = { version = "1.0.229", features = ["derive"] }

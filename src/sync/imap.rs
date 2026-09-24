@@ -8,11 +8,27 @@ use tokio::net::TcpStream;
 use tokio_rustls::{TlsConnector, client::TlsStream};
 
 use crate::models::AccountConfig;
+use crate::oauth::{self, Login};
 
 pub type ImapSession = Session<TlsStream<TcpStream>>;
 
+/// SASL XOAUTH2. A failed attempt comes back as a challenge carrying the
+/// error, which has to be answered with an empty line before the server says
+/// NO -- so the payload goes out once and nothing after it.
+struct XOAuth2 {
+    payload: Option<String>,
+}
+
+impl async_imap::Authenticator for XOAuth2 {
+    type Response = String;
+
+    fn process(&mut self, _challenge: &[u8]) -> String {
+        self.payload.take().unwrap_or_default()
+    }
+}
+
 /// Connect over TLS (port 993 style) and authenticate.
-pub async fn connect(cfg: &AccountConfig, password: &str) -> Result<ImapSession> {
+pub async fn connect(cfg: &AccountConfig, login: &Login) -> Result<ImapSession> {
     let tcp = TcpStream::connect((cfg.imap_host.as_str(), cfg.imap_port))
         .await
         .with_context(|| format!("connecting to {}:{}", cfg.imap_host, cfg.imap_port))?;
@@ -38,11 +54,29 @@ pub async fn connect(cfg: &AccountConfig, password: &str) -> Result<ImapSession>
         .context("reading IMAP greeting")?
         .ok_or_else(|| anyhow::anyhow!("IMAP server closed the connection (check host/port)"))?;
 
-    let session = client
-        .login(cfg.imap_username(), password)
-        .await
-        .map_err(|(err, _client)| err)
-        .context("IMAP login failed (wrong credentials or auth not allowed)")?;
+    let session = match login {
+        Login::Password(password) => client
+            .login(cfg.imap_username(), password)
+            .await
+            .map_err(|(err, _client)| err)
+            .context("IMAP login failed (wrong credentials or auth not allowed)")?,
+        Login::Bearer(token) => {
+            let auth = XOAuth2 {
+                payload: Some(oauth::xoauth2_payload(cfg.imap_username(), token)),
+            };
+            match client.authenticate("XOAUTH2", auth).await {
+                Ok(session) => session,
+                Err((err, _client)) => {
+                    // Maybe revoked, maybe just early; either way the next
+                    // attempt should ask for a fresh token.
+                    oauth::forget(&cfg.email);
+                    return Err(anyhow::Error::from(err).context(
+                        "IMAP sign-in was refused — the account may need signing in again",
+                    ));
+                }
+            }
+        }
+    };
     Ok(session)
 }
 
@@ -57,6 +91,13 @@ pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<String>> {
     Ok(names
         .iter()
         .filter(|n| !n.name().is_empty())
+        // Containers like Gmail's "[Gmail]" cannot be EXAMINEd; one of them
+        // would fail the whole sync pass.
+        .filter(|n| {
+            !n.attributes()
+                .iter()
+                .any(|a| matches!(a, async_imap::types::NameAttribute::NoSelect))
+        })
         .map(|n| n.name().to_string())
         .collect())
 }

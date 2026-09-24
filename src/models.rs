@@ -18,6 +18,18 @@ pub struct AccountConfig {
     pub smtp_port: u16,
     #[serde(default)]
     pub smtp_security: SmtpSecurity,
+    /// Set when the account signs in through the browser. The keyring then
+    /// holds a refresh token rather than a password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<OAuthProvider>,
+}
+
+/// Providers AirMail can sign in to through the browser. See `crate::oauth`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OAuthProvider {
+    Google,
+    Microsoft,
 }
 
 /// How the SMTP connection is encrypted. Providers split roughly in two:

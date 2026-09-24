@@ -19,6 +19,7 @@ fn test_account(email: &str) -> AccountConfig {
         smtp_host: "smtp.example.com".to_string(),
         smtp_port: 465,
         smtp_security: SmtpSecurity::Tls,
+        oauth: None,
     }
 }
 
@@ -59,8 +60,10 @@ fn uidvalidity_change_purges_folder() {
 
     let id = db.upsert_account(&test_account("v@w.x")).unwrap();
     let folder = db.upsert_folder(id, "INBOX", Some(1)).unwrap();
-    db.store_message(folder, 1, "s", "f", "t", None, true, false, false, "b", "", b"r")
-        .unwrap();
+    db.store_message(
+        folder, 1, "s", "f", "t", None, true, false, false, "b", "", b"r",
+    )
+    .unwrap();
     assert_eq!(db.count_messages().unwrap(), 1);
 
     // server reports a new UIDVALIDITY → cache is wiped, resync from scratch
@@ -107,7 +110,10 @@ fn message_summaries_unified_and_per_folder() {
     assert!(unified.iter().any(|m| !m.seen));
     assert!(unified.iter().any(|m| m.has_attachments));
 
-    assert!(unified.iter().any(|m| m.flagged), "the star is carried over");
+    assert!(
+        unified.iter().any(|m| m.flagged),
+        "the star is carried over"
+    );
     assert_eq!(db.count_flagged().unwrap(), 1);
 
     // An empty scope is an empty list, not everything.

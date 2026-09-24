@@ -14,45 +14,63 @@ prefix = "$HOME/.local"
 
 [commands]
 
+# Everything below that builds or runs AirMail depends on this first. It checks
+# for what the build links against (gtk4, libadwaita, webkitgtk-6.0) and the
+# tools it calls, and installs only what is missing through `sudo rvn install`
+# -- so a fresh machine needs nothing fetched by hand. A no-op when all is
+# there. See scripts/system-deps.sh for the list.
+[commands.system-deps]
+desc = "Install the system packages AirMail needs (gtk4, libadwaita, webkitgtk-6.0, …) with rvn"
+alias = ["setup"]
+run = ["scripts/system-deps.sh"]
+
 [commands.build]
 desc = "Build airmail"
+dep = ["system-deps"]
 alias = ["b"]
 run = ["cargo build"]
 watch = ["src/**/*.rs", "Cargo.toml"]
 
 [commands.release]
 desc = "Build airmail with optimisations"
+dep = ["system-deps"]
 run = ["cargo build --release"]
 
 [commands.run]
 desc = "Run the airmail GUI"
+dep = ["system-deps"]
 alias = ["r"]
 run = ["cargo run"]
 watch = ["src/**/*.rs", "Cargo.toml"]
 
 [commands.debug]
 desc = "Run the GUI with airmail's own tracing turned up"
+dep = ["system-deps"]
 env = { RUST_LOG = "airmail=debug,info" }
 run = ["cargo run"]
 
 [commands.inspector]
 desc = "Run the GUI with the GTK Inspector attached (widget tree, CSS, live styles)"
+dep = ["system-deps"]
 env = { GTK_DEBUG = "interactive" }
 run = ["cargo run"]
 
 [commands.strict]
 desc = "Run the GUI with GTK criticals made fatal — a UI smoke test with a window"
+dep = ["system-deps"]
 env = { G_DEBUG = "fatal-criticals" }
 run = ["cargo run"]
 
 [commands.check]
 desc = "Type-check everything, tests included"
+dep = ["system-deps"]
 alias = ["c"]
 run = ["cargo check --all-targets"]
 watch = ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml"]
 
 [commands.clippy]
 desc = "Lint with warnings as errors"
+dep = ["system-deps"]
 alias = ["l", "lint"]
 run = ["cargo clippy --all-targets -- -D warnings"]
 
@@ -67,12 +85,14 @@ run = ["cargo fmt --check"]
 
 [commands.test]
 desc = "Run tests"
+dep = ["system-deps"]
 alias = ["t"]
 run = ["cargo test"]
 watch = ["src/**/*.rs", "tests/**/*.rs"]
 
 [commands.test-ui]
 desc = "Run only the UI tests (setup form, palette) — no display needed"
+dep = ["system-deps"]
 run = ["cargo test --test ui_smoke"]
 
 [commands.gate]
@@ -83,12 +103,13 @@ run = ["echo 'gate: formatting, lints and tests all pass'"]
 
 [commands.doctor]
 desc = "Check IMAP/SMTP connectivity for all configured accounts"
+dep = ["system-deps"]
 run = ["cargo run -- --doctor"]
 
 [commands.deps]
-desc = "Show the GTK/libadwaita versions this build links against"
+desc = "Show the GTK/libadwaita/WebKitGTK versions this build links against"
 run = [
-  "pkg-config --modversion gtk4 libadwaita-1",
+  "pkg-config --modversion gtk4 libadwaita-1 webkitgtk-6.0",
   "cargo tree --depth 1",
 ]
 
@@ -99,6 +120,7 @@ run = ["echo 'AirMail installed to {{prefix}} — it should now show up in your 
 
 [commands.install-files]
 desc = "Copy an already-built AirMail into prefix, without building it first"
+dep = ["system-deps"]
 run = [
   "install -Dm755 target/release/airmail {{prefix}}/bin/airmail",
   "install -Dm644 data/icons/hicolor/scalable/apps/dev.raven.AirMail.svg {{prefix}}/share/icons/hicolor/scalable/apps/dev.raven.AirMail.svg",

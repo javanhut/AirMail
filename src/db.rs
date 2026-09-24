@@ -155,6 +155,8 @@ impl Db {
                 smtp_host: row.get(6)?,
                 smtp_port: row.get(7)?,
                 smtp_security: smtp_security_from(&row.get::<_, String>(9)?),
+                // How it signs in lives in the account's TOML, not here.
+                oauth: None,
             };
             Ok(Account {
                 id: row.get(0)?,
@@ -351,10 +353,7 @@ impl Db {
             Some([]) => return Ok(Vec::new()),
             Some(ids) => format!(
                 " AND m.folder_id IN ({})",
-                ids.iter()
-                    .map(i64::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",")
+                ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
             ),
         };
         let sql = format!(
@@ -441,11 +440,11 @@ impl Db {
     }
 
     pub fn count_flagged(&self) -> Result<i64> {
-        Ok(self
-            .conn
-            .query_row("SELECT COUNT(*) FROM messages WHERE flagged = 1", [], |row| {
-                row.get(0)
-            })?)
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE flagged = 1",
+            [],
+            |row| row.get(0),
+        )?)
     }
 
     pub fn message_detail(&self, message_db_id: i64) -> Result<Option<MessageDetail>> {

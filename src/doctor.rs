@@ -27,17 +27,23 @@ pub async fn run() -> Result<()> {
 }
 
 async fn check(cfg: &AccountConfig) -> Result<String> {
-    let password =
-        crate::config::get_password(&cfg.email).context("add the account through the GUI first")?;
+    let login = crate::oauth::login_for(cfg)
+        .await
+        .context("add the account through the GUI first")?;
 
-    let mut session = crate::sync::imap::connect(cfg, &password).await?;
+    let mut session = crate::sync::imap::connect(cfg, &login).await?;
     let folders = crate::sync::imap::list_folders(&mut session).await?;
     let _ = session.logout().await;
 
-    crate::smtp::check_account(cfg, &password).await?;
+    crate::smtp::check_account(cfg, &login).await?;
 
+    let how = if cfg.oauth.is_some() {
+        "browser sign-in"
+    } else {
+        "password"
+    };
     Ok(format!(
-        "IMAP login OK, {} folder(s); SMTP auth OK",
+        "{how}: IMAP login OK, {} folder(s); SMTP auth OK",
         folders.len()
     ))
 }

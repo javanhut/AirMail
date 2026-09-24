@@ -6,7 +6,6 @@ use anyhow::{Context, Result};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::config;
 use crate::db::Db;
 use crate::mailparse;
 use crate::models::AccountConfig;
@@ -66,8 +65,8 @@ async fn sync_once(
     account: &AccountConfig,
     tx: &mpsc::UnboundedSender<SyncEvent>,
 ) -> Result<()> {
-    let password = config::get_password(&account.email)?;
-    let mut session = crate::sync::imap::connect(account, &password).await?;
+    let login = crate::oauth::login_for(account).await?;
+    let mut session = crate::sync::imap::connect(account, &login).await?;
 
     // Opening the DB connection can block on locks; do it off the executor.
     let mut db = tokio::task::spawn_blocking({

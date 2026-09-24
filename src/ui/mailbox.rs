@@ -27,7 +27,12 @@ pub struct ReadingPane {
     pub date: gtk::Label,
     pub star: gtk::Button,
     pub unread_button: gtk::Button,
+    /// Plain-text messages.
     pub body: gtk::TextView,
+    /// HTML messages.
+    pub html: super::html_view::HtmlView,
+    /// Which of the two is showing: "text" or "html".
+    pub body_stack: gtk::Stack,
 }
 
 /// Header: the brand block, the search well and the two actions on the right.
@@ -348,8 +353,14 @@ pub fn build_reading_pane() -> (gtk::Box, ReadingPane) {
     // AirMail only ever reads from IMAP so far. They are shown so the row
     // keeps its shape, and held insensitive so they cannot lie.
     for (button, why) in [
-        (&archive, "Archiving isn't available yet — AirMail doesn't move messages on the server"),
-        (&delete, "Deleting isn't available yet — AirMail doesn't move messages on the server"),
+        (
+            &archive,
+            "Archiving isn't available yet — AirMail doesn't move messages on the server",
+        ),
+        (
+            &delete,
+            "Deleting isn't available yet — AirMail doesn't move messages on the server",
+        ),
         (&snooze, "Snoozing isn't available yet"),
     ] {
         button.set_sensitive(false);
@@ -444,7 +455,13 @@ pub fn build_reading_pane() -> (gtk::Box, ReadingPane) {
         .vexpand(true)
         .child(&card)
         .build();
-    content.append(&scroller);
+
+    let html = super::html_view::HtmlView::new();
+    let body_stack = gtk::Stack::new();
+    body_stack.set_vexpand(true);
+    body_stack.add_named(&scroller, Some("text"));
+    body_stack.add_named(&html.root, Some("html"));
+    content.append(&body_stack);
 
     let stack = gtk::Stack::new();
     stack.add_named(&empty, Some("empty"));
@@ -466,6 +483,8 @@ pub fn build_reading_pane() -> (gtk::Box, ReadingPane) {
             star,
             unread_button,
             body,
+            html,
+            body_stack,
         },
     )
 }
@@ -815,11 +834,13 @@ pub fn update_reading_pane(state: &Rc<RefCell<AppState>>, ui: &Ui) {
     let sender = display_sender(&detail.summary.from);
     let address = sender_address(&detail.summary.from);
     ui.reading.sender.set_text(&sender);
-    ui.reading.address.set_text(&if address.is_empty() || address == sender {
-        String::new()
-    } else {
-        format!("<{address}>")
-    });
+    ui.reading
+        .address
+        .set_text(&if address.is_empty() || address == sender {
+            String::new()
+        } else {
+            format!("<{address}>")
+        });
     ui.reading.to.set_text(&format!("to {}", detail.to));
     ui.reading.date.set_text(
         &detail
@@ -855,13 +876,17 @@ pub fn update_reading_pane(state: &Rc<RefCell<AppState>>, ui: &Ui) {
     }
     ui.reading.avatar_slot.append(&theme::avatar(&sender, 44));
 
-    if detail.body_text.trim().is_empty() {
-        ui.reading
-            .body
-            .buffer()
-            .set_text("This message has no plain-text part, and HTML isn't rendered yet.");
+    if !detail.body_html.trim().is_empty() {
+        ui.reading.html.show(&detail.body_html);
+        ui.reading.body_stack.set_visible_child_name("html");
     } else {
-        ui.reading.body.buffer().set_text(&detail.body_text);
+        let text = if detail.body_text.trim().is_empty() {
+            "This message has no text."
+        } else {
+            &detail.body_text
+        };
+        ui.reading.body.buffer().set_text(text);
+        ui.reading.body_stack.set_visible_child_name("text");
     }
     ui.reading.stack.set_visible_child_name("message");
 
@@ -930,7 +955,9 @@ pub fn mark_unread(state: &Rc<RefCell<AppState>>, ui: &Ui) {
     };
     match result {
         Ok(()) => crate::ui::refresh_all(state, ui),
-        Err(e) => crate::ui::set_status(state, ui, format!("Could not mark it unread: {e:#}"), true),
+        Err(e) => {
+            crate::ui::set_status(state, ui, format!("Could not mark it unread: {e:#}"), true)
+        }
     }
 }
 

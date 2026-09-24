@@ -16,6 +16,11 @@ pub fn accounts_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// Client registrations for browser sign-in. See `crate::oauth`.
+pub fn oauth_config_path() -> Result<PathBuf> {
+    Ok(project_dirs()?.config_dir().join("oauth.toml"))
+}
+
 pub fn db_path() -> Result<PathBuf> {
     let dir = project_dirs()?.data_dir().to_path_buf();
     fs::create_dir_all(&dir)?;

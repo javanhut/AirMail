@@ -5,7 +5,7 @@
 //! an address implies and what it saves, `NewKeyring`, which decides whether
 //! two typed passwords are worth sending, and the pure helpers in `theme`.
 
-use airmail::models::SmtpSecurity;
+use airmail::models::{OAuthProvider, SmtpSecurity};
 use airmail::ui::keyring_setup::NewKeyring;
 use airmail::ui::setup::{Choice, SetupForm};
 use airmail::ui::theme;
@@ -36,6 +36,57 @@ fn a_known_address_picks_its_provider() {
     assert_eq!(config.email, "ada@gmail.com");
     assert_eq!(config.imap_host, "imap.gmail.com");
     assert_eq!(password, "app-password");
+}
+
+#[test]
+fn gmail_signs_in_through_the_browser_when_a_client_is_configured() {
+    let mut form = SetupForm::default().with_browser_sign_in(vec![OAuthProvider::Google]);
+    form.set_email("ada@gmail.com");
+    assert_eq!(form.browser_provider(), Some(OAuthProvider::Google));
+    assert!(form.is_ready(), "no password needed");
+
+    let (config, password) = form.save().expect("nothing else to fill in");
+    assert_eq!(config.oauth, Some(OAuthProvider::Google));
+    assert!(password.is_empty(), "the refresh token comes later");
+}
+
+#[test]
+fn the_app_password_hint_explains_how_to_set_up_browser_sign_in() {
+    for (address, section) in [
+        ("ada@gmail.com", "[google]"),
+        ("ada@outlook.com", "[microsoft]"),
+    ] {
+        let mut form = SetupForm::default();
+        form.set_email(address);
+        let hint = form
+            .hint()
+            .expect("both want something other than the web password");
+        assert!(hint.contains("app password"), "{address}: {hint}");
+        assert!(
+            hint.contains("oauth.toml") && hint.contains(section),
+            "{address}: {hint}"
+        );
+        // Broken markup would leave the label blank. Links are GtkLabel's
+        // addition to Pango markup, so they come out before Pango checks it.
+        gtk::pango::parse_markup(&without_links(&hint), '\0').expect("hint is valid markup");
+    }
+
+    // A provider with no browser sign-in gets only the password hint.
+    let mut form = SetupForm::default();
+    form.set_email("ada@icloud.com");
+    assert!(!form.hint().unwrap().contains("oauth.toml"));
+}
+
+#[test]
+fn providers_without_browser_sign_in_still_want_a_password() {
+    let mut form = SetupForm::default().with_browser_sign_in(vec![OAuthProvider::Google]);
+    form.set_email("ada@icloud.com");
+    assert_eq!(form.browser_provider(), None);
+    assert!(!form.is_ready());
+
+    // Outlook offers it, but this machine has no Microsoft client ID.
+    form.set_email("ada@outlook.com");
+    assert_eq!(form.browser_provider(), None);
 }
 
 #[test]
@@ -173,4 +224,14 @@ fn a_new_keyring_says_when_the_two_disagree() {
 
     form.again = "hunter2".into();
     assert_eq!(form.validate(), Ok("hunter2"));
+}
+
+/// Markup with `<a href="…">` and `</a>` removed, keeping the link text.
+fn without_links(markup: &str) -> String {
+    let mut out = markup.replace("</a>", "");
+    while let Some(start) = out.find("<a ") {
+        let end = start + out[start..].find('>').expect("unclosed <a> tag");
+        out.replace_range(start..=end, "");
+    }
+    out
 }

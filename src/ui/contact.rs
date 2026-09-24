@@ -175,14 +175,13 @@ pub fn update(state: &Rc<RefCell<AppState>>, ui: &Ui, detail: &MessageDetail) {
         },
     ));
     if let Some(first) = stats.first {
-        ui.contact
-            .about
-            .append(&fact("document-open-recent-symbolic", &format!(
+        ui.contact.about.append(&fact(
+            "document-open-recent-symbolic",
+            &format!(
                 "First heard from {}",
-                first
-                    .with_timezone(&chrono::Local)
-                    .format("%b %-d, %Y")
-            )));
+                first.with_timezone(&chrono::Local).format("%b %-d, %Y")
+            ),
+        ));
     }
     if let Some(last) = stats.last {
         ui.contact.about.append(&fact(
@@ -202,7 +201,9 @@ pub fn update(state: &Rc<RefCell<AppState>>, ui: &Ui, detail: &MessageDetail) {
         }
     }
     clear_box(&ui.contact.folders);
-    ui.contact.folders_heading.set_visible(!seen_folders.is_empty());
+    ui.contact
+        .folders_heading
+        .set_visible(!seen_folders.is_empty());
     ui.contact.folders.set_visible(!seen_folders.is_empty());
     for folder_name in &seen_folders {
         let folder_id = state.borrow().folder_id_by_name(folder_name);
