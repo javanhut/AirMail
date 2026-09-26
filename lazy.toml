@@ -19,7 +19,14 @@ prefix = "$HOME/.local"
 # tools it calls, and installs only what is missing through `sudo rvn install`
 # -- so a fresh machine needs nothing fetched by hand. A no-op when all is
 # there. See scripts/system-deps.sh for the list.
+[commands.add-permissions]
+desc = "add permissions to  scripts"
+escalate = true
+run = ["chmod +x scripts/system-deps.sh"]
+
 [commands.system-deps]
+escalate = true
+dep = ["add-permissions"]
 desc = "Install the system packages AirMail needs (gtk4, libadwaita, webkitgtk-6.0, …) with rvn"
 alias = ["setup"]
 run = ["scripts/system-deps.sh"]
@@ -116,10 +123,13 @@ run = [
 [commands.install]
 desc = "Build and install AirMail for the current user (override: prefix=/usr/local)"
 dep = ["release", "install-files"]
-run = ["echo 'AirMail installed to {{prefix}} — it should now show up in your launcher'"]
+run = [
+  "echo 'AirMail installed to {{prefix}} — it should now show up in your launcher'",
+]
 
 [commands.install-files]
 desc = "Copy an already-built AirMail into prefix, without building it first"
+escalate = true
 dep = ["system-deps"]
 run = [
   "install -Dm755 target/release/airmail {{prefix}}/bin/airmail",
