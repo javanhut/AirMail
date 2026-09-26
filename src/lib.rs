@@ -1,5 +1,6 @@
 pub mod config;
 pub mod db;
+pub mod desktop;
 pub mod doctor;
 pub mod html;
 pub mod keyring;

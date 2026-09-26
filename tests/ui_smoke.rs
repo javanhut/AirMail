@@ -235,3 +235,19 @@ fn without_links(markup: &str) -> String {
     }
     out
 }
+
+#[test]
+fn the_stylesheet_follows_the_desktop() {
+    use airmail::desktop::ThemeMode;
+
+    let light = theme::css_for(theme::palette_for(ThemeMode::Light), "#F7768E", false);
+    assert!(light.contains("@define-color accent_bg_color #F7768E;"));
+    assert!(light.contains(&format!("background-color: {};", theme::LIGHT.bg_deep)));
+    assert!(!light.contains(theme::DARK.bg_deep));
+    assert_eq!(light.matches('{').count(), light.matches('}').count());
+
+    // Auto is dark in Raven; glass lets the ground through.
+    assert_eq!(theme::palette_for(ThemeMode::Auto), &theme::DARK);
+    let glass = theme::css_for(&theme::DARK, "#7AA2F7", true);
+    assert!(glass.contains(&format!("alpha({}, 0.86)", theme::DARK.bg_deep)));
+}

@@ -3,40 +3,102 @@
 //! Everything visual lives here so the panels stay about mail: the rest of the
 //! UI asks for a `.surface` style class or `theme::avatar()` rather than
 //! mixing its own colours. Under GTK the palette is a stylesheet rather than a
-//! set of paint calls, so the constants below exist to be interpolated into
-//! `css()` — which is a pure function, and therefore testable without a
+//! set of paint calls, so the palettes below exist to be interpolated into
+//! `css_for()` — which is a pure function, and therefore testable without a
 //! display.
+//!
+//! Light or dark, the accent and window transparency are the desktop's, read
+//! from `~/.config/raven/desktop.toml` (see `crate::desktop`) and followed
+//! live: when Raven Settings rewrites the file the stylesheet is rebuilt and
+//! swapped in place.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::Duration;
 
 use adw::prelude::*;
 
-// Backgrounds, darkest first. The window sits on near-black navy; the three
-// mail columns step up from it, and cards step up again toward the reader.
-pub const BG_DEEP: &str = "#070A12";
-pub const PANEL: &str = "#0C111C";
-pub const PANEL_RAISED: &str = "#0F1524";
-pub const SURFACE: &str = "#141B2B";
-pub const SURFACE_HOVER: &str = "#1A2234";
-pub const SURFACE_ACTIVE: &str = "#222C44";
+use crate::desktop::{self, Desktop, ThemeMode};
 
-// The blue that carries every primary action, plus the wash behind a selected
-// row (the same hue at low weight, so selection reads as "lit", not "boxed").
-pub const ACCENT: &str = "#3B82F6";
-pub const ACCENT_HOVER: &str = "#609CFA";
-pub const ACCENT_PRESSED: &str = "#2563EB";
-pub const SELECTED_BG: &str = "#1C2C4E";
-pub const SELECTED_EDGE: &str = "#3B5FA8";
+/// The neutrals one scheme is drawn in. The accent is not here: it is the
+/// desktop's, and every accent tint below (hover, pressed, the selected-row
+/// wash and its edge) is derived from it in `css_for()`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Palette {
+    // Backgrounds, deepest first. The window sits on the ground; the three
+    // mail columns step up from it, and cards step up again toward the reader.
+    pub bg_deep: &'static str,
+    pub panel: &'static str,
+    pub panel_raised: &'static str,
+    pub surface: &'static str,
+    pub surface_hover: &'static str,
+    pub surface_active: &'static str,
 
-pub const BORDER: &str = "#1C2435";
-pub const BORDER_SOFT: &str = "#151C2A";
+    pub border: &'static str,
+    pub border_soft: &'static str,
 
-pub const TEXT: &str = "#E8ECF4";
-pub const TEXT_MUTED: &str = "#98A2B8";
-pub const TEXT_FAINT: &str = "#69748C";
+    pub text: &'static str,
+    pub text_muted: &'static str,
+    pub text_faint: &'static str,
 
-pub const DANGER: &str = "#F87171";
-pub const WARN: &str = "#FBBF24";
-pub const SUCCESS: &str = "#4ADE80";
-pub const STAR: &str = "#FBBF24";
+    pub danger: &'static str,
+    pub warn: &'static str,
+    pub success: &'static str,
+    pub star: &'static str,
+
+    /// How much of the accent the selected row's wash and edge carry, mixed
+    /// into `surface`. A dark ground needs less to read as "lit".
+    pub selected_wash: f64,
+    pub selected_edge: f64,
+    /// `shade()` factor for an avatar's initial: full strength on dark,
+    /// darkened on light so a yellow initial stays legible on its pale disc.
+    pub avatar_ink: f64,
+}
+
+/// AirMail's own look: near-black navy.
+pub const DARK: Palette = Palette {
+    bg_deep: "#070A12",
+    panel: "#0C111C",
+    panel_raised: "#0F1524",
+    surface: "#141B2B",
+    surface_hover: "#1A2234",
+    surface_active: "#222C44",
+    border: "#1C2435",
+    border_soft: "#151C2A",
+    text: "#E8ECF4",
+    text_muted: "#98A2B8",
+    text_faint: "#69748C",
+    danger: "#F87171",
+    warn: "#FBBF24",
+    success: "#4ADE80",
+    star: "#FBBF24",
+    selected_wash: 0.25,
+    selected_edge: 0.60,
+    avatar_ink: 1.0,
+};
+
+/// The same hierarchy on paper: a cool grey ground, white columns and cards,
+/// ink-dark text, and status colours a step deeper so they hold on white.
+pub const LIGHT: Palette = Palette {
+    bg_deep: "#E9EDF4",
+    panel: "#F4F6FA",
+    panel_raised: "#FAFBFD",
+    surface: "#FFFFFF",
+    surface_hover: "#E6EAF1",
+    surface_active: "#D8DFEA",
+    border: "#D3DAE5",
+    border_soft: "#DFE4EC",
+    text: "#141A26",
+    text_muted: "#4A5468",
+    text_faint: "#7A8499",
+    danger: "#DC2626",
+    warn: "#B7791F",
+    success: "#16A34A",
+    star: "#D69E00",
+    selected_wash: 0.14,
+    selected_edge: 0.55,
+    avatar_ink: 0.62,
+};
 
 /// Avatar colours, picked per correspondent so a sender keeps the same dot.
 pub const AVATARS: &[&str] = &[
@@ -50,7 +112,7 @@ pub const LABEL_COLORS: &[&str] = &[
     "#EF4444", "#3B82F6", "#22C55E", "#A855F7", "#FACC15", "#F97316", "#EC4899", "#14B8A6",
 ];
 
-/// Diameters avatars are drawn at. Each gets a rule in `css()`, because a
+/// Diameters avatars are drawn at. Each gets a rule in `css_for()`, because a
 /// circle's radius has to track its size and GTK has no way to say "half of
 /// whatever this is" in CSS.
 pub const AVATAR_SIZES: &[i32] = &[20, 28, 36, 44, 56];
@@ -58,35 +120,168 @@ pub const AVATAR_SIZES: &[i32] = &[20, 28, 36, 44, 56];
 pub const RADIUS: u8 = 12;
 pub const RADIUS_SMALL: u8 = 8;
 
-/// Install the palette on the default display and force the dark scheme.
-/// Called once at startup. AirMail is dark only, so libadwaita is told not to
-/// follow the desktop's preference.
-pub fn apply() {
-    adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
+/// How long the desktop file has to stay quiet before it is re-read. Settings
+/// writes it by rename, which a directory monitor reports as a burst.
+const DESKTOP_SETTLE: Duration = Duration::from_millis(150);
 
-    let provider = gtk::CssProvider::new();
-    provider.load_from_string(&css());
-    if let Some(display) = gtk::gdk::Display::default() {
+thread_local! {
+    static PROVIDER: RefCell<Option<gtk::CssProvider>> = const { RefCell::new(None) };
+    static DESKTOP_MONITOR: RefCell<Option<gtk::gio::FileMonitor>> = const { RefCell::new(None) };
+}
+
+/// Install the stylesheet for the desktop's current appearance and start
+/// following `desktop.toml`. Called at startup; safe to call again.
+pub fn apply() {
+    apply_desktop(&Desktop::load());
+    watch_desktop();
+}
+
+/// Set libadwaita's scheme and swap in the stylesheet for `desktop`. The
+/// previous provider is removed, never stacked, so this can run on every
+/// change of the file.
+pub fn apply_desktop(desktop: &Desktop) {
+    let appearance = &desktop.appearance;
+    adw::StyleManager::default().set_color_scheme(match appearance.theme_mode {
+        ThemeMode::Dark => adw::ColorScheme::ForceDark,
+        ThemeMode::Light => adw::ColorScheme::ForceLight,
+        // Auto is dark across Raven; libadwaita may still follow a portal.
+        ThemeMode::Auto => adw::ColorScheme::PreferDark,
+    });
+
+    let css = css_for(
+        palette_for(appearance.theme_mode),
+        desktop.accent(),
+        appearance.transparency,
+    );
+    let Some(display) = gtk::gdk::Display::default() else {
+        return;
+    };
+    PROVIDER.with(|slot| {
+        if let Some(old) = slot.borrow_mut().take() {
+            gtk::style_context_remove_provider_for_display(&display, &old);
+        }
+        let provider = gtk::CssProvider::new();
+        provider.load_from_string(&css);
         gtk::style_context_add_provider_for_display(
             &display,
             &provider,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
+        *slot.borrow_mut() = Some(provider);
+    });
+}
+
+/// Light is light; dark and auto are dark (Raven's auto means dark).
+pub fn palette_for(mode: ThemeMode) -> &'static Palette {
+    match mode {
+        ThemeMode::Light => &LIGHT,
+        ThemeMode::Dark | ThemeMode::Auto => &DARK,
     }
 }
 
-/// The whole stylesheet, as a string. Built here rather than shipped as a
-/// static `.css` file so the palette constants stay the single source of
-/// truth, and so a test can check it without opening a display.
+/// Re-apply whenever Settings rewrites `desktop.toml`. The directory is
+/// watched rather than the file, because the file may not exist yet and is
+/// replaced by rename; events are filtered by name and debounced.
+fn watch_desktop() {
+    if DESKTOP_MONITOR.with(|m| m.borrow().is_some()) {
+        return;
+    }
+    let path = desktop::path();
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return;
+    };
+    let name = name.to_os_string();
+    let monitor = match gtk::gio::File::for_path(dir).monitor_directory(
+        gtk::gio::FileMonitorFlags::WATCH_MOVES,
+        gtk::gio::Cancellable::NONE,
+    ) {
+        Ok(monitor) => monitor,
+        Err(e) => {
+            tracing::debug!("not following {}: {e}", path.display());
+            return;
+        }
+    };
+    let pending: Rc<RefCell<Option<gtk::glib::SourceId>>> = Rc::new(RefCell::new(None));
+    monitor.connect_changed(move |_, file, other, event| {
+        if matches!(
+            event,
+            gtk::gio::FileMonitorEvent::AttributeChanged
+                | gtk::gio::FileMonitorEvent::PreUnmount
+                | gtk::gio::FileMonitorEvent::Unmounted
+        ) {
+            return;
+        }
+        let names_desktop = |f: Option<&gtk::gio::File>| {
+            f.and_then(|f| f.basename())
+                .is_some_and(|b| b.as_os_str() == name.as_os_str())
+        };
+        if !names_desktop(Some(file)) && !names_desktop(other) {
+            return;
+        }
+        if let Some(id) = pending.borrow_mut().take() {
+            id.remove();
+        }
+        let fired = pending.clone();
+        let id = gtk::glib::timeout_add_local_once(DESKTOP_SETTLE, move || {
+            fired.borrow_mut().take();
+            apply_desktop(&Desktop::load());
+        });
+        *pending.borrow_mut() = Some(id);
+    });
+    DESKTOP_MONITOR.with(|m| *m.borrow_mut() = Some(monitor));
+}
+
+/// The stylesheet as the defaults draw it: dark, Raven's accent, glass on.
 pub fn css() -> String {
-    let mut css = format!(
+    css_for(&DARK, desktop::DEFAULT_ACCENT, true)
+}
+
+/// The whole stylesheet, as a string. Built here rather than shipped as a
+/// static `.css` file so the palettes stay the single source of truth, and so
+/// a test can check it without opening a display.
+///
+/// `accent` must be `#RRGGBB` (`Desktop::accent()` guarantees it). With
+/// `glass`, the window ground and the mail columns let some of the desktop
+/// through; the compositor draws the blur. Cards and the reader stay opaque.
+pub fn css_for(p: &Palette, accent: &str, glass: bool) -> String {
+    let Palette {
+        panel_raised,
+        surface,
+        surface_hover,
+        surface_active,
+        border,
+        border_soft,
+        text,
+        text_muted,
+        text_faint,
+        danger,
+        star,
+        ..
+    } = *p;
+    let (bg_deep, panel) = if glass {
+        (
+            format!("alpha({}, 0.86)", p.bg_deep),
+            format!("alpha({}, 0.70)", p.panel),
+        )
+    } else {
+        (p.bg_deep.to_string(), p.panel.to_string())
+    };
+    let accent_hover = format!("shade({accent}, 1.15)");
+    let accent_pressed = format!("shade({accent}, 0.85)");
+    let selected_bg = format!("mix({surface}, {accent}, {})", p.selected_wash);
+    let selected_edge = format!("mix({surface}, {accent}, {})", p.selected_edge);
+    // libadwaita's own widgets (switches, focus rings, suggested buttons)
+    // take the desktop's accent too.
+    let mut css =
+        format!("@define-color accent_bg_color {accent};\n@define-color accent_color {accent};\n");
+    css.push_str(&format!(
         "
-window.airmail, .bg-deep {{ background-color: {BG_DEEP}; color: {TEXT}; }}
-.panel {{ background-color: {PANEL}; }}
-.panel-raised {{ background-color: {PANEL_RAISED}; }}
+window.airmail, .bg-deep {{ background-color: {bg_deep}; color: {text}; }}
+.panel {{ background-color: {panel}; }}
+.panel-raised {{ background-color: {panel_raised}; }}
 .surface {{
-    background-color: {SURFACE};
-    border: 1px solid {BORDER};
+    background-color: {surface};
+    border: 1px solid {border};
     border-radius: {RADIUS}px;
 }}
 
@@ -94,48 +289,48 @@ window.airmail, .bg-deep {{ background-color: {BG_DEEP}; color: {TEXT}; }}
    with the same outline and corners as the plain-text card. */
 .html-card {{
     background-color: #ffffff;
-    border: 1px solid {BORDER};
+    border: 1px solid {border};
     border-radius: {RADIUS}px;
 }}
 .images-bar {{ padding: 2px 4px; }}
 
 /* The three mail columns are separated by a hairline rather than by GTK's
    default panel shadow, which is invisible at these values anyway. */
-.column-edge {{ border-left: 1px solid {BORDER_SOFT}; }}
+.column-edge {{ border-left: 1px solid {border_soft}; }}
 
 headerbar {{
-    background-color: {BG_DEEP};
+    background-color: {bg_deep};
     box-shadow: none;
-    border-bottom: 1px solid {BORDER_SOFT};
+    border-bottom: 1px solid {border_soft};
     min-height: 54px;
 }}
 
 /* Type scale. The egui UI sized text per label; here it is class-driven. */
-.title {{ font-size: 17px; font-weight: 800; color: {TEXT}; }}
-.subject {{ font-size: 22px; font-weight: 700; color: {TEXT}; }}
-.heading-sm {{ font-size: 15px; font-weight: 700; color: {TEXT}; }}
-.muted {{ color: {TEXT_MUTED}; }}
-.faint {{ color: {TEXT_FAINT}; }}
+.title {{ font-size: 17px; font-weight: 800; color: {text}; }}
+.subject {{ font-size: 22px; font-weight: 700; color: {text}; }}
+.heading-sm {{ font-size: 15px; font-weight: 700; color: {text}; }}
+.muted {{ color: {text_muted}; }}
+.faint {{ color: {text_faint}; }}
 .small {{ font-size: 11.5px; }}
 .tiny {{ font-size: 10.5px; }}
-.danger {{ color: {DANGER}; }}
-.accent {{ color: {ACCENT}; }}
+.danger {{ color: {danger}; }}
+.accent {{ color: {accent}; }}
 .section-label {{
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.08em;
-    color: {TEXT_FAINT};
+    color: {text_faint};
 }}
 
 /* The search field in the header: one rounded well holding an icon, the
    entry itself and the shortcut hint, so the hint sits inside the pill. */
 .searchbox {{
-    background-color: {PANEL_RAISED};
-    border: 1px solid {BORDER};
+    background-color: {panel_raised};
+    border: 1px solid {border};
     border-radius: 11px;
     padding: 3px 10px;
 }}
-.searchbox:focus-within {{ border-color: {SELECTED_EDGE}; background-color: {SURFACE}; }}
+.searchbox:focus-within {{ border-color: {selected_edge}; background-color: {surface}; }}
 .searchbox entry, .searchbox entry text {{
     background: none;
     background-image: none;
@@ -143,16 +338,16 @@ headerbar {{
     box-shadow: none;
     outline: none;
     min-height: 28px;
-    color: {TEXT};
+    color: {text};
 }}
-.searchbox image {{ color: {TEXT_FAINT}; }}
+.searchbox image {{ color: {text_faint}; }}
 
 /* Keyboard hints — Ctrl K in the search well, Ctrl N on Compose. */
 .kbd {{
     font-size: 10px;
     font-weight: 700;
-    color: {TEXT_FAINT};
-    background-color: {SURFACE_HOVER};
+    color: {text_faint};
+    background-color: {surface_hover};
     border-radius: 5px;
     padding: 2px 6px;
 }}
@@ -166,36 +361,36 @@ button.primary .kbd {{ background-color: alpha(#FFFFFF, 0.18); color: #FFFFFF; }
     padding: 5px 8px;
     min-height: 0;
 }}
-.nav-row:hover, .message-row:hover {{ background-color: {SURFACE_HOVER}; }}
+.nav-row:hover, .message-row:hover {{ background-color: {surface_hover}; }}
 .nav-row.selected {{
-    background-color: {SURFACE};
-    border-color: {BORDER};
+    background-color: {surface};
+    border-color: {border};
 }}
-.nav-row.selected label {{ color: {TEXT}; }}
-.nav-row.selected image {{ color: {ACCENT}; }}
-.nav-row label {{ color: {TEXT_MUTED}; }}
-.nav-row image {{ color: {TEXT_FAINT}; }}
+.nav-row.selected label {{ color: {text}; }}
+.nav-row.selected image {{ color: {accent}; }}
+.nav-row label {{ color: {text_muted}; }}
+.nav-row image {{ color: {text_faint}; }}
 
 /* Message list rows. The selected row is the one place the accent shows as a
    wash, which is what makes the open message obvious from across the pane. */
 .message-row {{ border-radius: {RADIUS}px; padding: 10px 12px; }}
 row.message-row:selected, .message-row.selected {{
-    background-color: {SELECTED_BG};
-    border-color: {SELECTED_EDGE};
+    background-color: {selected_bg};
+    border-color: {selected_edge};
 }}
 listview.messages {{ background: none; }}
 listview.messages > row {{ padding: 0; background: none; border: none; }}
 listview.messages > row:selected {{ background: none; }}
 listview.messages > row:selected .message-row {{
-    background-color: {SELECTED_BG};
-    border-color: {SELECTED_EDGE};
+    background-color: {selected_bg};
+    border-color: {selected_edge};
 }}
-label.sender {{ font-size: 13.5px; font-weight: 600; color: {TEXT_MUTED}; }}
-label.row-subject {{ font-size: 13px; color: {TEXT_MUTED}; }}
-.unread label.sender {{ color: {TEXT}; font-weight: 800; }}
-.unread label.row-subject {{ color: {TEXT}; font-weight: 600; }}
+label.sender {{ font-size: 13.5px; font-weight: 600; color: {text_muted}; }}
+label.row-subject {{ font-size: 13px; color: {text_muted}; }}
+.unread label.sender {{ color: {text}; font-weight: 800; }}
+.unread label.row-subject {{ color: {text}; font-weight: 600; }}
 /* A starred row's mark, and the toolbar button once it is on. */
-.star-on, button.star.on image {{ color: {STAR}; }}
+.star-on, button.star.on image {{ color: {star}; }}
 
 /* Filter chips over the message list. */
 .chip {{
@@ -206,32 +401,32 @@ label.row-subject {{ font-size: 13px; color: {TEXT_MUTED}; }}
     padding: 4px 12px;
     font-size: 12px;
     font-weight: 600;
-    color: {TEXT_MUTED};
+    color: {text_muted};
     min-height: 0;
     box-shadow: none;
 }}
-.chip:hover {{ background-color: {SURFACE_HOVER}; color: {TEXT}; }}
+.chip:hover {{ background-color: {surface_hover}; color: {text}; }}
 .chip.selected {{
-    background-color: {SURFACE_ACTIVE};
-    border-color: {SELECTED_EDGE};
-    color: {TEXT};
+    background-color: {surface_active};
+    border-color: {selected_edge};
+    color: {text};
 }}
 
 /* Counts, as on the sidebar's unread badges. */
 .count-badge {{
-    background-color: {SURFACE_HOVER};
-    color: {TEXT_MUTED};
+    background-color: {surface_hover};
+    color: {text_muted};
     border-radius: 9px;
     padding: 1px 7px;
     font-size: 11px;
     font-weight: 700;
 }}
-.count-badge.highlight {{ background-color: {ACCENT}; color: #FFFFFF; }}
+.count-badge.highlight {{ background-color: {accent}; color: #FFFFFF; }}
 
 /* The one primary action in a view. */
 button.primary {{
     background-image: none;
-    background-color: {ACCENT};
+    background-color: {accent};
     color: #FFFFFF;
     font-weight: 700;
     border: none;
@@ -239,10 +434,10 @@ button.primary {{
     padding: 8px 12px;
     box-shadow: none;
 }}
-button.primary:hover {{ background-color: {ACCENT_HOVER}; }}
-button.primary:active {{ background-color: {ACCENT_PRESSED}; }}
-button.primary:disabled {{ background-color: {SURFACE_ACTIVE}; color: {TEXT_FAINT}; }}
-button.destructive {{ background-image: none; background-color: {DANGER}; color: #FFFFFF; border: none; }}
+button.primary:hover {{ background-color: {accent_hover}; }}
+button.primary:active {{ background-color: {accent_pressed}; }}
+button.primary:disabled {{ background-color: {surface_active}; color: {text_faint}; }}
+button.destructive {{ background-image: none; background-color: {danger}; color: #FFFFFF; border: none; }}
 
 /* Icon buttons: the reading-pane toolbar, the header, the contact actions. */
 button.icon {{
@@ -250,52 +445,53 @@ button.icon {{
     background-image: none;
     border: 1px solid transparent;
     border-radius: {RADIUS_SMALL}px;
-    color: {TEXT_MUTED};
+    color: {text_muted};
     min-width: 30px;
     min-height: 30px;
     padding: 4px;
     box-shadow: none;
 }}
-button.icon:hover {{ background-color: {SURFACE_HOVER}; color: {TEXT}; }}
-button.icon:disabled {{ color: alpha({TEXT_FAINT}, 0.45); }}
+button.icon:hover {{ background-color: {surface_hover}; color: {text}; }}
+button.icon:disabled {{ color: alpha({text_faint}, 0.45); }}
 button.icon.tile {{
-    background-color: {SURFACE};
-    border-color: {BORDER};
+    background-color: {surface};
+    border-color: {border};
     min-width: 40px;
     min-height: 36px;
 }}
-button.icon.tile:hover {{ background-color: {SURFACE_HOVER}; border-color: {SELECTED_EDGE}; }}
-.toolbar-row {{ border-bottom: 1px solid {BORDER_SOFT}; }}
+button.icon.tile:hover {{ background-color: {surface_hover}; border-color: {selected_edge}; }}
+.toolbar-row {{ border-bottom: 1px solid {border_soft}; }}
 
 /* Provider tiles in the setup dialog. */
 .tile {{
-    background-color: {SURFACE};
-    border: 1px solid {BORDER};
+    background-color: {surface};
+    border: 1px solid {border};
     border-radius: {RADIUS}px;
     padding: 10px 12px;
-    color: {TEXT_MUTED};
+    color: {text_muted};
 }}
-.tile:hover {{ background-color: {SURFACE_HOVER}; border-color: {SELECTED_EDGE}; color: {TEXT}; }}
-.tile:checked {{ background-color: {SELECTED_BG}; border-color: {ACCENT}; color: {TEXT}; }}
+.tile:hover {{ background-color: {surface_hover}; border-color: {selected_edge}; color: {text}; }}
+.tile:checked {{ background-color: {selected_bg}; border-color: {accent}; color: {text}; }}
 
 textview.reading, textview.reading text {{
-    background-color: {SURFACE};
-    color: {TEXT};
+    background-color: {surface};
+    color: {text};
     font-size: 13.5px;
 }}
-textview.compose, textview.compose text {{ background-color: {SURFACE}; color: {TEXT}; }}
-.rule {{ background-color: {BORDER_SOFT}; min-height: 1px; }}
-.statusbar {{ background-color: {BG_DEEP}; border-top: 1px solid {BORDER_SOFT}; }}
+textview.compose, textview.compose text {{ background-color: {surface}; color: {text}; }}
+.rule {{ background-color: {border_soft}; min-height: 1px; }}
+.statusbar {{ background-color: {bg_deep}; border-top: 1px solid {border_soft}; }}
 scrollbar {{ background: none; }}
 "
-    );
+    ));
 
     // One class per avatar colour: a tinted disc with the sender's initial,
     // matching the fill/stroke/text weights the painted version used.
     for (i, colour) in AVATARS.iter().enumerate() {
         css.push_str(&format!(
             ".avatar-{i} {{ background-color: alpha({colour}, 0.30); \
-             border: 1px solid alpha({colour}, 0.75); color: {colour}; }}\n"
+             border: 1px solid alpha({colour}, 0.75); color: shade({colour}, {ink}); }}\n",
+            ink = p.avatar_ink,
         ));
     }
     // One class per diameter, for the radius and the initial's size.
