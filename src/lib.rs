@@ -2,6 +2,7 @@ pub mod config;
 pub mod db;
 pub mod desktop;
 pub mod doctor;
+pub mod glass_tint;
 pub mod html;
 pub mod keyring;
 pub mod mailparse;

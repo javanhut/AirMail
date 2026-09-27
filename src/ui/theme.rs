@@ -7,10 +7,10 @@
 //! `css_for()` — which is a pure function, and therefore testable without a
 //! display.
 //!
-//! Light or dark, the accent and window transparency are the desktop's, read
-//! from `~/.config/raven/desktop.toml` (see `crate::desktop`) and followed
-//! live: when Raven Settings rewrites the file the stylesheet is rebuilt and
-//! swapped in place.
+//! Light or dark, the accent, the glass theme and window transparency are
+//! the desktop's, read from `~/.config/raven/desktop.toml` (see
+//! `crate::desktop`) and followed live: when Raven Settings rewrites the file
+//! the stylesheet is rebuilt and swapped in place.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -148,10 +148,14 @@ pub fn apply_desktop(desktop: &Desktop) {
         ThemeMode::Auto => adw::ColorScheme::PreferDark,
     });
 
-    let css = css_for(
+    let css = css_tinted(
         palette_for(appearance.theme_mode),
         desktop.accent(),
         appearance.transparency,
+        Tint::for_glass(
+            &appearance.glass_theme,
+            appearance.theme_mode == ThemeMode::Light,
+        ),
     );
     let Some(display) = gtk::gdk::Display::default() else {
         return;
@@ -177,6 +181,58 @@ pub fn palette_for(mode: ThemeMode) -> &'static Palette {
         ThemeMode::Light => &LIGHT,
         ThemeMode::Dark | ThemeMode::Auto => &DARK,
     }
+}
+
+/// A glass theme other than Black: its ground and text, which AirMail's
+/// neutrals are re-drawn between (see `tone`). Black Glass is no tint at
+/// all, so it draws exactly the palettes above.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tint {
+    ground: [u8; 3],
+    text: [u8; 3],
+}
+
+impl Tint {
+    /// The tint for `appearance.glass_theme`, or `None` for Black Glass (and
+    /// for a theme this build does not know). The colours are
+    /// `crate::glass_tint`'s, so AirMail wears the compositor's grounds.
+    pub fn for_glass(theme: &str, light: bool) -> Option<Tint> {
+        let css = crate::glass_tint::css(theme, light);
+        let colour = |name: &str| {
+            let at = css.find(&format!("@define-color {name} #"))? + name.len() + 16;
+            rgb(css.get(at..at + 6)?)
+        };
+        Some(Tint {
+            ground: colour("window_bg_color")?,
+            text: colour("window_fg_color")?,
+        })
+    }
+
+    /// `colour` moved from `p`'s ground-to-text axis onto this tint's: a
+    /// surface a shade off the ground stays a shade off the new ground, muted
+    /// text stays as far between ground and text as it was.
+    fn tone(&self, p: &Palette, colour: &str) -> String {
+        let (Some(c), Some(g), Some(t)) = (rgb(colour), rgb(p.bg_deep), rgb(p.text)) else {
+            return colour.to_string();
+        };
+        let axis = |i: usize| f64::from(t[i]) - f64::from(g[i]);
+        let along: f64 = (0..3)
+            .map(|i| (f64::from(c[i]) - f64::from(g[i])) * axis(i))
+            .sum();
+        let length: f64 = (0..3).map(|i| axis(i) * axis(i)).sum();
+        let k = if length > 0.0 { along / length } else { 0.0 };
+        let m = |i: usize| {
+            let (a, b) = (f64::from(self.ground[i]), f64::from(self.text[i]));
+            (a + (b - a) * k).round().clamp(0.0, 255.0) as u8
+        };
+        format!("#{:02X}{:02X}{:02X}", m(0), m(1), m(2))
+    }
+}
+
+fn rgb(hex: &str) -> Option<[u8; 3]> {
+    let h = hex.strip_prefix('#').unwrap_or(hex);
+    let at = |i: usize| h.get(i..i + 2).and_then(|c| u8::from_str_radix(c, 16).ok());
+    Some([at(0)?, at(2)?, at(4)?])
 }
 
 /// Re-apply whenever Settings rewrites `desktop.toml`. The directory is
@@ -244,27 +300,33 @@ pub fn css() -> String {
 /// `glass`, the window ground and the mail columns let some of the desktop
 /// through; the compositor draws the blur. Cards and the reader stay opaque.
 pub fn css_for(p: &Palette, accent: &str, glass: bool) -> String {
-    let Palette {
-        panel_raised,
-        surface,
-        surface_hover,
-        surface_active,
-        border,
-        border_soft,
-        text,
-        text_muted,
-        text_faint,
-        danger,
-        star,
-        ..
-    } = *p;
+    css_tinted(p, accent, glass, None)
+}
+
+/// [`css_for`], with the neutrals re-drawn in a glass theme's ground and
+/// text. The accent and the status colours stay as they are.
+pub fn css_tinted(p: &Palette, accent: &str, glass: bool, tint: Option<Tint>) -> String {
+    let Palette { danger, star, .. } = *p;
+    let tone = |colour: &str| match tint {
+        Some(tint) => tint.tone(p, colour),
+        None => colour.to_string(),
+    };
+    let panel_raised = tone(p.panel_raised);
+    let surface = tone(p.surface);
+    let surface_hover = tone(p.surface_hover);
+    let surface_active = tone(p.surface_active);
+    let border = tone(p.border);
+    let border_soft = tone(p.border_soft);
+    let text = tone(p.text);
+    let text_muted = tone(p.text_muted);
+    let text_faint = tone(p.text_faint);
     let (bg_deep, panel) = if glass {
         (
-            format!("alpha({}, 0.86)", p.bg_deep),
-            format!("alpha({}, 0.70)", p.panel),
+            format!("alpha({}, 0.86)", tone(p.bg_deep)),
+            format!("alpha({}, 0.70)", tone(p.panel)),
         )
     } else {
-        (p.bg_deep.to_string(), p.panel.to_string())
+        (tone(p.bg_deep), tone(p.panel))
     };
     let accent_hover = format!("shade({accent}, 1.15)");
     let accent_pressed = format!("shade({accent}, 0.85)");

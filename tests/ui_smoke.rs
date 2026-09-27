@@ -251,3 +251,22 @@ fn the_stylesheet_follows_the_desktop() {
     let glass = theme::css_for(&theme::DARK, "#7AA2F7", true);
     assert!(glass.contains(&format!("alpha({}, 0.86)", theme::DARK.bg_deep)));
 }
+
+#[test]
+fn the_stylesheet_wears_the_glass_theme() {
+    // Black Glass is no tint: the palettes exactly as they are.
+    assert_eq!(theme::Tint::for_glass("black", false), None);
+    assert_eq!(theme::Tint::for_glass("", true), None);
+
+    // Rose re-grounds the window in the compositor's rose, text and all.
+    let rose = theme::css_tinted(
+        &theme::DARK,
+        "#7AA2F7",
+        true,
+        theme::Tint::for_glass("rose", false),
+    );
+    assert!(rose.contains("alpha(#5A3A4E, 0.86)"), "{rose}");
+    assert!(rose.contains("color: #FFF4F8;"));
+    assert!(!rose.contains(theme::DARK.bg_deep));
+    assert_eq!(rose.matches('{').count(), rose.matches('}').count());
+}
