@@ -195,9 +195,9 @@ pub struct Tint {
 impl Tint {
     /// The tint for `appearance.glass_theme`, or `None` for Black Glass (and
     /// for a theme this build does not know). The colours are
-    /// `crate::glass_tint`'s, so AirMail wears the compositor's grounds.
+    /// `raven_glass::tint`'s, so AirMail wears the compositor's grounds.
     pub fn for_glass(theme: &str, light: bool) -> Option<Tint> {
-        let css = crate::glass_tint::css(theme, light);
+        let css = raven_glass::tint::css(theme, light);
         let colour = |name: &str| {
             let at = css.find(&format!("@define-color {name} #"))? + name.len() + 16;
             rgb(css.get(at..at + 6)?)
