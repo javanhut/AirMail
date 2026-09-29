@@ -71,10 +71,12 @@ pub fn present(
     on_send: impl Fn(SendRequest) + 'static,
 ) {
     let dialog = adw::Dialog::new();
-    dialog.set_title(if prefill.subject.is_empty() {
-        "New message"
-    } else {
+    // A mailto: link can arrive with a subject, so a subject alone does not
+    // make this a reply; `reply_to` always starts it with `Re:`.
+    dialog.set_title(if prefill.subject.to_lowercase().starts_with("re:") {
         "Reply"
+    } else {
+        "New message"
     });
     dialog.set_content_width(620);
     dialog.set_content_height(520);

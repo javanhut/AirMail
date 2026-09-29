@@ -1340,15 +1340,74 @@ fn install_shortcuts(window: &adw::ApplicationWindow, state: &Rc<RefCell<AppStat
     window.add_controller(controller);
 }
 
-pub fn run() -> Result<()> {
+/// Write the message a `mailto:` link describes. With no account to send it
+/// from, the setup dialog is already up (see `run`), so all that can be done
+/// is to say why nothing else opened.
+pub fn open_mailto(state: &Rc<RefCell<AppState>>, ui: &Ui, mailto: crate::mailto::Mailto) {
+    if state.borrow().accounts.is_empty() {
+        set_status(state, ui, "Add an account to send mail", true);
+        return;
+    }
+    open_composer_with(
+        state,
+        ui,
+        Prefill {
+            to: mailto.to,
+            subject: mailto.subject,
+            body: mailto.body,
+        },
+    );
+}
+
+/// Make AirMail the current user's default for `mailto:` links, the way
+/// Raven Settings' Default applications card does: through GIO, into
+/// `~/.config/mimeapps.list`.
+pub fn set_default_mail_client() -> Result<()> {
+    let id = format!("{APP_ID}.desktop");
+    let info = gtk::gio::AppInfo::all()
+        .into_iter()
+        .find(|info| info.id().is_some_and(|i| i == id))
+        .with_context(|| format!("{id} is not installed where the desktop can see it"))?;
+    info.set_as_default_for_type("x-scheme-handler/mailto")?;
+    Ok(())
+}
+
+/// Run the application. `links` are the `mailto:` URIs from the command line;
+/// they reach the running AirMail, if there is one, rather than starting a
+/// second.
+pub fn run(links: &[String]) -> Result<()> {
+    let app = adw::Application::builder()
+        .application_id(APP_ID)
+        .flags(gtk::gio::ApplicationFlags::HANDLES_OPEN)
+        .build();
+    // AirMail parses its own arguments in `main`; GTK is given only the links,
+    // which GApplication turns into `open` -- in this process, or forwarded to
+    // the one already running.
+    let mut args = vec!["airmail"];
+    args.extend(links.iter().map(String::as_str));
+
+    // Already running: hand the links over and leave, before opening the
+    // database or starting a second set of sync workers that would only be
+    // torn down again. Every mailto: click while AirMail is open comes here.
+    if app.register(None::<&gtk::gio::Cancellable>).is_ok() && app.is_remote() {
+        return exit_status(app.run_with_args(&args));
+    }
+
     // Opening the database and starting the sync workers can fail, and it is
     // nicer to fail on the command line than inside `activate`.
     let (state, sync_rx, send_rx) = AppState::new()?;
     let state = Rc::new(RefCell::new(state));
     let startup = RefCell::new(Some((sync_rx, send_rx)));
+    // One window for the life of the process: `activate` and `open` both land
+    // here, and a second launch must not build a second one.
+    let window: Rc<RefCell<Option<Ui>>> = Rc::new(RefCell::new(None));
+    let state_for_open = state.clone();
 
-    let app = adw::Application::builder().application_id(APP_ID).build();
-    app.connect_activate(move |app| {
+    let show = move |app: &adw::Application| -> Ui {
+        if let Some(ui) = window.borrow().as_ref() {
+            ui.window.present();
+            return ui.clone();
+        }
         theme::apply();
         let ui = build_window(app, &state);
 
@@ -1362,10 +1421,33 @@ pub fn run() -> Result<()> {
             open_setup(&state, &ui);
         }
         ui.window.present();
-    });
+        *window.borrow_mut() = Some(ui.clone());
+        ui
+    };
+    let show = Rc::new(show);
 
-    // AirMail parses its own arguments in `main`, so GTK is given none.
-    let exit = app.run_with_args::<&str>(&[]);
+    {
+        let show = show.clone();
+        app.connect_activate(move |app| {
+            show(app);
+        });
+    }
+    {
+        let state = state_for_open;
+        app.connect_open(move |app, files, _hint| {
+            let ui = show(app);
+            for file in files {
+                if let Some(mailto) = crate::mailto::Mailto::parse(&file.uri()) {
+                    open_mailto(&state, &ui, mailto);
+                }
+            }
+        });
+    }
+
+    exit_status(app.run_with_args(&args))
+}
+
+fn exit_status(exit: gtk::glib::ExitCode) -> Result<()> {
     if exit == gtk::glib::ExitCode::SUCCESS {
         Ok(())
     } else {

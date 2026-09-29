@@ -5,6 +5,7 @@ pub mod doctor;
 pub mod html;
 pub mod keyring;
 pub mod mailparse;
+pub mod mailto;
 pub mod models;
 pub mod oauth;
 pub mod providers;
